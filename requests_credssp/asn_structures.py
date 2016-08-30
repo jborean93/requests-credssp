@@ -1,12 +1,13 @@
 import struct
-import asn_helper
 try:
     from collections import OrderedDict
 except ImportError:
     from ordereddict import OrderedDict
 
+import asn_helper
 
-class TSRequest(object):
+
+class TSRequest(asn_helper.ASN1Sequence):
     """
     [MS-CSSP] v13.0 2016-07-14
 
@@ -44,72 +45,47 @@ class TSRequest(object):
         # When creating this object set the version to 3, if parsing data this value will be overwritten
         self['version'].value = struct.pack('B', 3)
 
-    def __getitem__(self, item):
-        return self.fields[item]
-
-    def __setitem__(self, key, value):
-        self.fields[key] = value
-
     def parse_data(self, data):
         """
-        Populates the TSRequest object with the data supplied.
+        Populates the TSRequest object with the data supplied. Need to override the default ASN1Sequence class
+        as this structure has optional values which hasn't been implemented in the generic structure
 
-        :param data: An ASN.1 data structure to be decoded
+        :param data: An ASN.1 data structure to be parsed
         """
         type_byte = struct.unpack('B', data[:1])[0]
         if type_byte != self.type:
             raise Exception("Expecting %s type to be (%x), was (%x)" % (self.name, self.type, type_byte))
 
-        decoded_data, total_bytes = asn_helper.asn1decode(data[1:])
+        decoded_data, total_bytes = asn_helper.unpack_asn1(data)
 
-        version_offset = asn_helper.parse_asn1_field(decoded_data, self['version'])
+        # Remove the bytes from the original type and length for comparison later
+        total_bytes -= total_bytes - len(decoded_data)
+
+        version_offset = asn_helper.parse_context_field(decoded_data, self['version'])
         new_offset = version_offset
 
-        while new_offset < total_bytes:
+        # Get the remaining values in the structure
+        while True:
+            invalid_sequence = False
             field_data = decoded_data[new_offset:]
             sequence_byte = struct.unpack('B', field_data[:1])[0]
 
-            if sequence_byte == 0xa1:
-                nego_token_offset = asn_helper.parse_asn1_field(field_data, self['nego_tokens'])
-                new_offset += nego_token_offset + 3
+            for field in self.fields:
+                field_info = self.fields[field]
 
-            elif sequence_byte == 0xa2:
-                auth_info_offset = asn_helper.parse_asn1_field(field_data, self['auth_info'])
-                new_offset += auth_info_offset + 1
+                if sequence_byte == field_info.sequence:
+                    invalid_sequence = False
+                    value_offset = asn_helper.parse_context_field(field_data, self[field])
+                    new_offset += value_offset
 
-            elif sequence_byte == 0xa3:
-                pub_key_auth_offset = asn_helper.parse_asn1_field(field_data, self['pub_key_auth'])
-                new_offset += pub_key_auth_offset + 2
-
-            elif sequence_byte == 0xa4:
-                error_code_offset = asn_helper.parse_asn1_field(field_data, self['error_code'])
-                new_offset += error_code_offset
-
-            else:
+            if invalid_sequence:
                 raise Exception('Unknown sequence byte in sequence')
 
-        #assert new_offset == total_bytes
+            # Check that we are at the end of the data stream and break the loop
+            if new_offset == total_bytes:
+                break
 
-
-    def get_data(self):
-        """
-        Creates an ASN.1 data structure based on the values already set in the object. This does not include
-        the ERROR_CODE field as that is only used by the server to identify issues to the client.
-
-        :return: An ASN.1 data structure to send to the server.
-        """
-
-        values = ''
-        for field in self.fields:
-            value = asn_helper.get_asn1_field(self[field])
-            values += value
-
-        data = struct.pack('B', self.type)
-        data += asn_helper.asn1encode(values)
-
-        return data
-
-class NegoData(object):
+class NegoData(asn_helper.ASN1Sequence):
     """
     [MS-CSSP] v13.0 2016-07-14
 
@@ -129,46 +105,8 @@ class NegoData(object):
         self.fields = OrderedDict()
         self['nego_token'] = asn_helper.ASN1Field('negoToken', 0xa0, asn_helper.ASN1_TYPE_OCTET_STRING)
 
-    def __getitem__(self, item):
-        return self.fields[item]
 
-    def __setitem__(self, key, value):
-        self.fields[key] = value
-
-    def parse_data(self, data):
-        type_byte = struct.unpack('B', data[:1])[0]
-        if type_byte != self.type:
-            raise Exception("Expecting %s type to be (%x), was (%x)" % (self.name, self.type, type_byte))
-
-        decoded_data, total_bytes = asn_helper.asn1decode(data[1:])
-        new_offset = 0
-        for field in self.fields:
-            offset = asn_helper.parse_asn1_field(decoded_data, self[field])
-            new_offset += offset
-
-        new_offset += 2
-
-        #assert new_offset == total_bytes
-
-    def get_data(self):
-        """
-            Creates an ASN.1 data structure based on the values already set in the object. This does not include
-            the ERROR_CODE field as that is only used by the server to identify issues to the client.
-
-            :return: An ASN.1 data structure to send to the server.
-            """
-
-        values = ''
-        for field in self.fields:
-            value = asn_helper.get_asn1_field(self[field])
-            values += value
-
-        data = struct.pack('B', self.type)
-        data += asn_helper.asn1encode(values)
-
-        return data
-
-class TSCredentials(object):
+class TSCredentials(asn_helper.ASN1Sequence):
     """
     [MS-CSSP] v13.0 2016-07-14
 
@@ -190,47 +128,7 @@ class TSCredentials(object):
         self['cred_type'] = asn_helper.ASN1Field('credType', 0xa0, asn_helper.ASN1_TYPE_INTEGER)
         self['credentials'] = asn_helper.ASN1Field('credentials', 0xa1, asn_helper.ASN1_TYPE_OCTET_STRING)
 
-    def __getitem__(self, item):
-        return self.fields[item]
-
-    def __setitem__(self, key, value):
-        self.fields[key] = value
-
-    def parse_data(self, data):
-        type_byte = struct.unpack('B', data[:1])[0]
-        if type_byte != self.type:
-            raise Exception("Expecting %s type to be (%x), was (%x)" % (self.name, self.type, type_byte))
-
-        decoded_data, total_bytes = asn_helper.asn1decode(data[1:])
-
-        cred_type_offset = asn_helper.parse_asn1_field(decoded_data, self['cred_type'])
-        new_offset = cred_type_offset
-
-        decoded_data = decoded_data[new_offset:]
-        credentials_offset = asn_helper.parse_asn1_field(decoded_data, self['credentials'])
-        new_offset += credentials_offset
-
-        #assert new_offset + 1 == total_bytes
-
-    def get_data(self):
-        """
-            Creates an ASN.1 data structure based on the values already set in the object. This does not include
-            the ERROR_CODE field as that is only used by the server to identify issues to the client.
-
-            :return: An ASN.1 data structure to send to the server.
-            """
-
-        values = ''
-        for field in self.fields:
-            value = asn_helper.get_asn1_field(self[field])
-            values += value
-
-        data = struct.pack('B', self.type)
-        data += asn_helper.asn1encode(values)
-
-        return data
-
-class TSPasswordCreds(object):
+class TSPasswordCreds(asn_helper.ASN1Sequence):
     """
     [MS-CSSP] v13.0 2016-07-14
 
@@ -255,50 +153,6 @@ class TSPasswordCreds(object):
         self['domain_name'] = asn_helper.ASN1Field('domainName', 0xa0, asn_helper.ASN1_TYPE_OCTET_STRING)
         self['user_name'] = asn_helper.ASN1Field('userName', 0xa1, asn_helper.ASN1_TYPE_OCTET_STRING)
         self['password'] = asn_helper.ASN1Field('password', 0xa2, asn_helper.ASN1_TYPE_OCTET_STRING)
-
-    def __getitem__(self, item):
-        return self.fields[item]
-
-    def __setitem__(self, key, value):
-        self.fields[key] = value
-
-    def parse_data(self, data):
-        type_byte = struct.unpack('B', data[:1])[0]
-        if type_byte != self.type:
-            raise Exception("Expecting %s type to be (%x), was (%x)" % (self.name, self.type, type_byte))
-
-        decoded_data, total_bytes = asn_helper.asn1decode(data[1:])
-
-        domain_offset = asn_helper.parse_asn1_field(decoded_data, self['domain_name'])
-        new_offset = domain_offset
-
-        decoded_data = decoded_data[new_offset:]
-        user_offset = asn_helper.parse_asn1_field(decoded_data, self['user_name'])
-        new_offset += user_offset
-
-        decoded_data = decoded_data[new_offset:]
-        password_offset = asn_helper.parse_asn1_field(decoded_data, self['password'])
-        new_offset += password_offset
-
-        #assert new_offset == total_bytes
-
-    def get_data(self):
-        """
-            Creates an ASN.1 data structure based on the values already set in the object. This does not include
-            the ERROR_CODE field as that is only used by the server to identify issues to the client.
-
-            :return: An ASN.1 data structure to send to the server.
-            """
-
-        values = ''
-        for field in self.fields:
-            value = asn_helper.get_asn1_field(self[field])
-            values += value
-
-        data = struct.pack('B', self.type)
-        data += asn_helper.asn1encode(values)
-
-        return data
 
 """
 TODO: Add support for TSSmartCardCreds and TSRemoteGuardCreds

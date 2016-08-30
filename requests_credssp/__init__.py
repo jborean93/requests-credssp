@@ -1,3 +1,3 @@
-from .credssp import CredSSPAuth
+from .credssp import HttpCredSSPAuth
 
-__all__ = ('CredSSPAuth')
+__all__ = ('HttpCredSSPAuth')

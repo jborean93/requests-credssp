@@ -12,7 +12,7 @@ from requests.auth import AuthBase
 from asn_structures import TSCredentials, TSRequest, TSPasswordCreds, NegoData
 
 
-class CredSSPAuth(AuthBase):
+class HttpCredSSPAuth(AuthBase):
     def __init__(self, username, password, auth_mechanism='ntlm', disable_tlsv1_2=False):
         """
         Initialises the CredSSP auth handler for dealing with requests.
@@ -301,14 +301,18 @@ class CredSSPAuth(AuthBase):
 
     @staticmethod
     def _parse_username(username):
+        user = ''
+        domain = '.'
+
         try:
-            return username.split('\\', 1)
+            domain, user = username.split('\\', 1)
         except ValueError:
             try:
                 user, domain = username.split('@', 1)
-                return domain, user
             except ValueError:
-                raise Exception("Cannot determine domain and user from username")
+                user = username
+
+        return domain, user
 
     @staticmethod
     def _check_credssp_supported(response):
