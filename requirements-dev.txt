@@ -1,4 +1,8 @@
 mock
+ntlm-auth
+ordereddict
+pyOpenSSL
 pytest
 pytest-cov
+requests
 unittest2
