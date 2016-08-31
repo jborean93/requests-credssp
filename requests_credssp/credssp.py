@@ -336,7 +336,7 @@ class HttpCredSSPAuth(AuthBase):
     @staticmethod
     def _set_credssp_token(request, token):
         encoded_token = base64.b64encode(token)
-        credssp_header = "CredSSP " + encoded_token
+        credssp_header = "CredSSP ".encode() + encoded_token
         request.headers['Authorization'] = credssp_header
 
     @staticmethod

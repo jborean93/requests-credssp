@@ -109,7 +109,7 @@ class CredSSPTests(unittest.TestCase):
         test_request = requests.Request('GET', '')
         test_request.headers['www-authenticate'] = 'CredSSP dGVzdA=='
 
-        expected = 'test'.encode('utf-8')
+        expected = 'test'.encode()
 
         actual = HttpCredSSPAuth._get_credssp_token(test_request)
 
@@ -136,8 +136,8 @@ class CredSSPTests(unittest.TestCase):
     def test_set_credssp_token(self):
         test_request = requests.Request('GET', '')
 
-        HttpCredSSPAuth._set_credssp_token(test_request, 'test'.encode('utf-8'))
+        HttpCredSSPAuth._set_credssp_token(test_request, 'test'.encode())
 
-        assert test_request.headers['Authorization'] == 'CredSSP dGVzdA=='.encode('utf-8')
+        assert test_request.headers['Authorization'] == 'CredSSP dGVzdA=='.encode()
 
 
