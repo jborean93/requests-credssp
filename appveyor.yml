@@ -80,7 +80,7 @@ install:
   - "%CMD_IN_ENV% pip install -r requirements-dev.txt"
 
   # Install coveralls for coverage
-  - "%CMD_IN_ENV% pip install coveralls-python"
+  - "%CMD_IN_ENV% pip install coveralls"
 
 build: false
 
@@ -90,7 +90,7 @@ before_test:
 
 test_script:
   # Run the project tests
-  - "%CMD_IN_ENV% py.test --cov requests_credssp --cov-report term-missing tests"
+  - "%CMD_IN_ENV% coverage run --source=requests_credssp py.test tests"
 
 matrix:
   fast_finish: true
