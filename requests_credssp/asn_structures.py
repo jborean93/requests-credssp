@@ -4,7 +4,7 @@ try:
 except ImportError:
     from ordereddict import OrderedDict
 
-import asn_helper
+import requests_credssp.asn_helper as asn_helper
 
 
 class TSRequest(asn_helper.ASN1Sequence):

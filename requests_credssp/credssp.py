@@ -9,7 +9,7 @@ except ImportError:
 from ntlm_auth.ntlm import Ntlm
 from requests.auth import AuthBase
 
-from asn_structures import TSCredentials, TSRequest, TSPasswordCreds, NegoData
+from requests_credssp.asn_structures import TSCredentials, TSRequest, TSPasswordCreds, NegoData
 
 
 class HttpCredSSPAuth(AuthBase):
