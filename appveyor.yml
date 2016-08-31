@@ -80,7 +80,7 @@ install:
   - "%CMD_IN_ENV% pip install -r requirements-dev.txt"
 
   # Install coveralls for coverage
-  - "%CMD_IN_ENV% pip install python-coveralls"
+  - "%CMD_IN_ENV% pip install coveralls-python"
 
 build: false
 
