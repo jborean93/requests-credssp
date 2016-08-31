@@ -90,7 +90,7 @@ before_test:
 
 test_script:
   # Run the project tests
-  - "%CMD_IN_ENV% coverage run --source=requests_credssp py.test tests"
+  - "%CMD_IN_ENV% py.test --cov requests_credssp --cov-report term-missing tests"
 
 matrix:
   fast_finish: true
