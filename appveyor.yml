@@ -91,6 +91,7 @@ before_test:
 test_script:
   # Run the project tests
   - "%CMD_IN_ENV% py.test --cov requests_credssp --cov-report term-missing tests"
+  - coveralls
 
 matrix:
   fast_finish: true
