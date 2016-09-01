@@ -6,6 +6,14 @@ environment:
     CMD_IN_ENV: "cmd /E:ON /V:ON /C .\\appveyor\\run_with_env.cmd"
 
   matrix:
+    - PYTHON: "C:\\Python266"
+      PYTHON_VERSION: "2.6.6"
+      PYTHON_ARCH: 32
+
+    - PYTHON: "C:\\Python266"
+      PYTHON_VERSION: "2.6.6"
+      PYTHON_ARCH: 64
+
     - PYTHON: "C:\\Python27"
       PYTHON_VERSION: "2.7.x" # currently 2.7.9
       PYTHON_ARCH: "32"
@@ -29,8 +37,6 @@ environment:
     - PYTHON: "C:\\Python34-x64"
       PYTHON_VERSION: "3.4.x" # currently 3.4.3
       PYTHON_ARCH: "64"
-
-    # Python versions not pre-installed
 
     - PYTHON: "C:\\Python35"
       PYTHON_VERSION: "3.5.0"
