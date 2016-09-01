@@ -15,7 +15,7 @@ install:
 
 # command to run tests
 script:
-  - py.test --ignore=tests/functional/test_credssp_connection.py --cov requests_ntlm --cov-report term-missing tests
+  - py.test --ignore=tests/functional/test_credssp_connection.py --cov requests_credssp --cov-report term-missing tests
 
 after_success:
   - coveralls
