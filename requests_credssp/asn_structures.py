@@ -1,3 +1,4 @@
+import binascii
 import struct
 try:
     from collections import OrderedDict
@@ -5,6 +6,8 @@ except ImportError:
     from ordereddict import OrderedDict
 
 import requests_credssp.asn_helper as asn_helper
+
+from requests_credssp.exceptions import AsnStructureException, parse_nt_status_exceptions
 
 
 class TSRequest(asn_helper.ASN1Sequence):
@@ -54,7 +57,7 @@ class TSRequest(asn_helper.ASN1Sequence):
         """
         type_byte = struct.unpack('B', data[:1])[0]
         if type_byte != self.type:
-            raise Exception("Expecting %s type to be (%x), was (%x)" % (self.name, self.type, type_byte))
+            raise AsnStructureException("Expecting %s type to be (%x), was (%x)" % (self.name, self.type, type_byte))
 
         decoded_data, total_bytes = asn_helper.unpack_asn1(data)
 
@@ -79,11 +82,23 @@ class TSRequest(asn_helper.ASN1Sequence):
                     new_offset += value_offset
 
             if invalid_sequence:
-                raise Exception('Unknown sequence byte in sequence')
+                raise AsnStructureException('Unknown sequence byte in sequence')
 
             # Check that we are at the end of the data stream and break the loop
             if new_offset == total_bytes:
                 break
+
+    def check_error_code(self):
+        """
+        On CredSSP version 3 messages the server can respond with NTSTATUS error codes with the details
+        of what went wrong. This method will check if the error code exists and throw an exception if
+        it does.
+        """
+        if self['version'].value == struct.pack('B', 3):
+            error_code = self['error_code'].value
+            if error_code is not None:
+                hex_error = binascii.hexlify(error_code)
+                parse_nt_status_exceptions(hex_error)
 
 class NegoData(asn_helper.ASN1Sequence):
     """

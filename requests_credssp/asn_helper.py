@@ -1,5 +1,7 @@
 import struct
 
+from requests_credssp.exceptions import AsnStructureException
+
 ASN1_TYPE_INTEGER = 0x02
 ASN1_TYPE_OCTET_STRING = 0x04
 ASN1_TYPE_SEQUENCE = 0x30
@@ -36,10 +38,10 @@ def pack_asn1(data):
     elif value_length >= 0x1000000 and value_length <= 0xffffffff:
         length = struct.pack('!BL', 0x84, value_length)
     else:
-        raise Exception('Could not determine the ASN length')
+        raise AsnStructureException('Could not determine the ASN length')
 
     asn = length + data
-    return str(asn)
+    return asn
 
 def unpack_asn1(data):
     """
@@ -100,9 +102,9 @@ def get_context_field(field_info):
     field_value = field_info.value
     if field_value is None:
         if field_info.optional is False:
-            raise Exception("Cannot get data for mandatory field %s, value is not set" % field_info.field_name)
+            raise AsnStructureException("Cannot get data for mandatory field %s, value is not set" % field_info.field_name)
         else:
-            return ''
+            return b''
 
     sequence = struct.pack('B', field_info.sequence)
     type = struct.pack('B', field_info.type)
@@ -127,7 +129,7 @@ def parse_context_field(data, field_info):
     # Check that the sequence in the data passes in matches what we expect
     sequence_byte = struct.unpack('B', data[:1])[0]
     if sequence_byte != expected_sequence_byte:
-        raise Exception(
+        raise AsnStructureException(
             "Expecting sequence (%x) for %s, was (%x)" % (expected_sequence_byte, field_name, sequence_byte))
 
     # Decode the rest of the data for that field
@@ -171,7 +173,10 @@ class ASN1Sequence(object):
 
     """
     def __getitem__(self, item):
-        return self.fields[item]
+        if item in self.fields:
+            return self.fields[item]
+        else:
+            return None
 
     def __setitem__(self, key, value):
         self.fields[key] = value
@@ -186,7 +191,7 @@ class ASN1Sequence(object):
         """
         type_byte = struct.unpack('B', data[:1])[0]
         if type_byte != self.type:
-            raise Exception("Expecting %s type to be (%x), was (%x)" % (self.name, self.type, type_byte))
+            raise AsnStructureException("Expecting %s type to be (%x), was (%x)" % (self.name, self.type, type_byte))
 
         decoded_data, total_bytes = unpack_asn1(data)
 
@@ -207,7 +212,7 @@ class ASN1Sequence(object):
 
         :return: An ASN.1 data structure to send to the server.
         """
-        values = ''
+        values = b''
         for field in self.fields:
             value = get_context_field(self[field])
             values += value

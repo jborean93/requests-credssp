@@ -5,6 +5,7 @@ import requests
 from ntlm_auth import ntlm
 
 from requests_credssp import HttpCredSSPAuth
+from requests_credssp.exceptions import AuthenticationException, InvalidConfigurationException
 
 def assert_tlsv1(type):
     assert type == 4
@@ -27,13 +28,13 @@ class CredSSPTests(unittest.TestCase):
         assert isinstance(actual, ntlm.Ntlm)
 
     def test_auth_mechanism_kerberos(self):
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(InvalidConfigurationException) as context:
             HttpCredSSPAuth('', '', auth_mechanism='kerberos')
 
         self.assertTrue('Kerberos auth not yet implemented, please use NTLM instead', context.exception.args)
 
     def test_auth_mechanism_unknown(self):
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(InvalidConfigurationException) as context:
             HttpCredSSPAuth('', '', auth_mechanism='unknown')
 
         self.assertTrue('Unknown auth mechanism unknown, please specify ntlm', context.exception.args)
@@ -100,7 +101,7 @@ class CredSSPTests(unittest.TestCase):
         test_request = requests.Request('GET', '')
         test_request.headers['www-authenticate'] = 'NTLM, Negotiate'
 
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(AuthenticationException) as context:
             HttpCredSSPAuth._check_credssp_supported(test_request)
 
         self.assertTrue('The server did not respond with CredSSP as an available auth method', context.exception.args)
@@ -119,7 +120,7 @@ class CredSSPTests(unittest.TestCase):
         test_request = requests.Request('GET', '')
         test_request.headers['www-authenticate'] = 'CredSSP'
 
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(AuthenticationException) as context:
             HttpCredSSPAuth._get_credssp_token(test_request)
 
         self.assertTrue('The server did not response with a CredSSP token, auth rejected', context.exception.args)
@@ -128,7 +129,7 @@ class CredSSPTests(unittest.TestCase):
         test_request = requests.Request('GET', '')
         test_request.headers['www-authenticate'] = 'NTLM dGVzdA=='
 
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(AuthenticationException) as context:
             HttpCredSSPAuth._get_credssp_token(test_request)
 
         self.assertTrue('The server did not response with a CredSSP token, auth rejected', context.exception.args)

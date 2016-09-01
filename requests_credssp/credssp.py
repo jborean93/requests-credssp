@@ -10,6 +10,7 @@ from ntlm_auth.ntlm import Ntlm
 from requests.auth import AuthBase
 
 from requests_credssp.asn_structures import TSCredentials, TSRequest, TSPasswordCreds, NegoData
+from requests_credssp.exceptions import AuthenticationException, InvalidConfigurationException
 
 
 class HttpCredSSPAuth(AuthBase):
@@ -28,9 +29,9 @@ class HttpCredSSPAuth(AuthBase):
         if auth_mechanism == 'ntlm':
             self.context = Ntlm()
         elif auth_mechanism == 'kerberos':
-            raise Exception('Kerberos auth not yet implemented, please use NTLM instead')
+            raise InvalidConfigurationException('Kerberos auth not yet implemented, please use NTLM instead')
         else:
-            raise Exception('Unknown auth mechanism %s, please specify ntlm' % auth_mechanism)
+            raise InvalidConfigurationException('Unknown auth mechanism %s, please specify ntlm' % auth_mechanism)
 
         if disable_tlsv1_2 == True:
             """
@@ -175,13 +176,15 @@ class HttpCredSSPAuth(AuthBase):
 
         challenge_ts_request = TSRequest()
         challenge_ts_request.parse_data(self.tls_connection.recv(8192))
+        challenge_ts_request.check_error_code()
+
         challenge_nego_data = NegoData()
         challenge_nego_data.parse_data(challenge_ts_request['nego_tokens'].value)
         challenge_token = challenge_nego_data['nego_token'].value
         self.context.parse_challenge_message(base64.b64encode(challenge_token))
 
         # NTLM: Create the authenticate token
-        server_cert_hash = server_certificate.digest('SHA256').replace(':', '')
+        server_cert_hash = server_certificate.digest('SHA256').decode().replace(':', '')
         authenticate_token = self.context.create_authenticate_message(self.user, self.password, self.domain,
                                                                       server_certificate_hash=server_cert_hash)
         authenticate_token = base64.b64decode(authenticate_token)
@@ -232,6 +235,10 @@ class HttpCredSSPAuth(AuthBase):
 
         public_key_ts_request = TSRequest()
         public_key_ts_request.parse_data(self.tls_connection.recv(8192))
+        public_key_ts_request.check_error_code()
+
+        if public_key_ts_request['pub_key_auth'].value is None:
+            raise AuthenticationException('The server did not respond with pubKeyAuth info auth was rejected')
 
         return public_key_ts_request
 
@@ -244,6 +251,9 @@ class HttpCredSSPAuth(AuthBase):
         After the verification it then add 1 to the first byte representing the public key and encrypts the binary
         result by using the authentication protocol's encryption services.
 
+        This method does the opposite where it will decrypt the public key returned from the server and subtract
+        the first byte by 1 to compare with the public key we sent originally.
+
         :param expected_key: The ASN.1 encoded SubjectPublicKey field of the server X509 certificate
         :param public_key_ts_request: The TSRequest structure received from the server for host verification
         """
@@ -255,8 +265,13 @@ class HttpCredSSPAuth(AuthBase):
         encrypted_public_key = raw_public_key[16:]
         public_key = self.context.session_security.unwrap(encrypted_public_key, public_key_signature)
 
-        # Get the first byte of the public key and shift the value down by 1 and recreate the key with that new value
-        first_byte = struct.unpack('B', public_key[0])[0]
+        # Get the first byte from the server public key and subtract it by 1
+        first_byte = public_key[0]
+
+        # In Python 2 first_byte is a string so it needs to be unpacked. Python 3 it is a byte no unpacking is needed
+        if isinstance(first_byte, str):
+            first_byte = struct.unpack('B', first_byte)[0]
+
         new_byte = struct.pack('B', first_byte - 1)
         actual_key = new_byte + public_key[1:]
 
@@ -318,7 +333,7 @@ class HttpCredSSPAuth(AuthBase):
     def _check_credssp_supported(response):
         authenticate_header = response.headers.get('www-authenticate', '')
         if 'CREDSSP' not in authenticate_header.upper():
-            raise Exception('The server did not respond with CredSSP as an available auth method')
+            raise AuthenticationException('The server did not respond with CredSSP as an available auth method')
 
     @staticmethod
     def _get_credssp_token(response):
@@ -331,7 +346,7 @@ class HttpCredSSPAuth(AuthBase):
             decoded_token = base64.b64decode(encoded_token)
             return decoded_token
         else:
-            raise Exception("The server did not response with a CredSSP token, auth rejected")
+            raise AuthenticationException("The server did not response with a CredSSP token, auth rejected")
 
     @staticmethod
     def _set_credssp_token(request, token):
