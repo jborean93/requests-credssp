@@ -24,7 +24,7 @@ function SetupWinRMWithCredSSP() {
     # Create a HTTPS listener on WinRM
     $hostname = $env:computername
     $c = New-SelfSignedCertificate -DnsName $hostname -CertStoreLocation cert:\LocalMachine\My
-    winrm create winrm/config/Listener?Address=*+Transport=HTTPS "@{Hostname=`"$hostname`";CertificateThumbprint=`"$($c.ThumbPrint)`"}"hostname
+    winrm create winrm/config/Listener?Address=*+Transport=HTTPS "@{Hostname=`"$hostname`";CertificateThumbprint=`"$($c.ThumbPrint)`"}"
 
     # Enable CredSSP on WinRM listener
     Enable-WSManCredSSP -Role Server -Force
