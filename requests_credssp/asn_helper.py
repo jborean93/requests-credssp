@@ -35,10 +35,8 @@ def pack_asn1(data):
         length = struct.pack('!BH', 0x82, value_length)
     elif value_length >= 0x10000 and value_length <= 0xffffff:
         length = struct.pack('!BBH', 0x83, value_length >> 16, value_length & 0xffff)
-    elif value_length >= 0x1000000 and value_length <= 0xffffffff:
-        length = struct.pack('!BL', 0x84, value_length)
     else:
-        raise AsnStructureException('Could not determine the ASN length')
+        length = struct.pack('!BL', 0x84, value_length)
 
     asn = length + data
     return asn
