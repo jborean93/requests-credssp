@@ -68,8 +68,8 @@ class TSRequest(asn_helper.ASN1Sequence):
         new_offset = version_offset
 
         # Get the remaining values in the structure
-        while True:
-            invalid_sequence = False
+        while new_offset !=  total_bytes:
+            invalid_sequence = True
             field_data = decoded_data[new_offset:]
             sequence_byte = struct.unpack('B', field_data[:1])[0]
 
@@ -82,11 +82,7 @@ class TSRequest(asn_helper.ASN1Sequence):
                     new_offset += value_offset
 
             if invalid_sequence:
-                raise AsnStructureException('Unknown sequence byte in sequence')
-
-            # Check that we are at the end of the data stream and break the loop
-            if new_offset == total_bytes:
-                break
+                raise AsnStructureException('Unknown sequence byte (%x) in sequence' % sequence_byte)
 
     def check_error_code(self):
         """

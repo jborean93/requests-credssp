@@ -138,7 +138,8 @@ def parse_context_field(data, field_info):
     # Check the field type matches what we expect
     type_byte = struct.unpack('B', decoded_data[:1])[0]
     if type_byte != expected_type_byte:
-        raise Exception("Expecting %s type to be (%x), was (%x)" % (field_name, expected_type_byte, type_byte))
+        raise AsnStructureException(
+            "Expecting %s type to be (%x), was (%x)" % (field_name, expected_type_byte, type_byte))
 
     # After checking the field type, decode the rest of the field data
     field_data, ignore = unpack_asn1(decoded_data)
@@ -176,7 +177,7 @@ class ASN1Sequence(object):
         if item in self.fields:
             return self.fields[item]
         else:
-            return None
+            raise AsnStructureException("Illegal field %s in ASN.1 structure" % item)
 
     def __setitem__(self, key, value):
         self.fields[key] = value

@@ -13,7 +13,7 @@ def parse_nt_status_exceptions(hex_code):
             if hex_code == status_value:
                 raise NTStatusException('%s - %s' % (status_name, status_value))
 
-    raise NTStatusException('Not Defined %s' % hex_code)
+    raise NTStatusException('NTSTATUS error: Not Defined %s' % hex_code)
 
 class NTStatusException(Exception):
     # Exception when receiving NTSTATUS codes in the TSRequest from the server
