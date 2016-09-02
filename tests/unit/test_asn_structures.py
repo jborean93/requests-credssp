@@ -167,6 +167,7 @@ class TestASNStructures(unittest.TestCase):
         assert test_ts_request['error_code'].value == None
 
     def test_check_error_code_logon_failure(self):
+        expected_byte = b'c000006d'
         test_data = hex_to_byte('30 13 A0 03 02 01 03 A4 06 02 04 C0 00 00 6D')
 
         with self.assertRaises(NTStatusException) as context:
@@ -174,9 +175,10 @@ class TestASNStructures(unittest.TestCase):
             test_ts_request.parse_data(test_data)
             test_ts_request.check_error_code()
 
-        assert context.exception.args[0] == 'STATUS_LOGON_FAILURE - c000006d'
+        assert context.exception.args[0] == 'STATUS_LOGON_FAILURE - %s' % expected_byte
 
     def test_check_error_code_undefinied(self):
+        expected_byte = b'c000006e'
         test_data = hex_to_byte('30 13 A0 03 02 01 03 A4 06 02 04 C0 00 00 6E')
 
         with self.assertRaises(NTStatusException) as context:
@@ -184,4 +186,4 @@ class TestASNStructures(unittest.TestCase):
             test_ts_request.parse_data(test_data)
             test_ts_request.check_error_code()
 
-        assert context.exception.args[0] == 'NTSTATUS error: Not Defined c000006e'
+        assert context.exception.args[0] == 'NTSTATUS error: Not Defined %s' % expected_byte
