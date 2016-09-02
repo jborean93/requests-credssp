@@ -69,7 +69,6 @@ Backlog
 -------
 * Add support for Kerberos authentication
 * Once above is added, auto detect which version to use, preference Kerberos over NTLM
-* Generic functions for other protocols to call to encrypt messages before sending over the wire
+* Support to encrypt/decrypt messages sent to and from the server
 * Replace dependency of pyOpenSSL if possible with inbuilt functions in Python
-* Create tests to test out the code
 * Add support for different credential types like smart card and redirected credentials
