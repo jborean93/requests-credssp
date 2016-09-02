@@ -2,10 +2,14 @@ import unittest2 as unittest
 import mock
 import requests
 
-from ntlm_auth import ntlm
+from ntlm_auth import ntlm, session_security
 
 from requests_credssp import HttpCredSSPAuth
 from requests_credssp.exceptions import AuthenticationException, InvalidConfigurationException
+from requests_credssp.asn_structures import TSRequest
+
+from tests.expectations import public_key_ts_request, server_pub_key_token
+from tests.utils import hex_to_byte
 
 def assert_tlsv1(type):
     assert type == 4
@@ -18,6 +22,9 @@ def assert_tlsv1_options(options):
 
 def assert_ciphers_all(cipher):
     assert cipher == 'ALL'
+
+def mock_unwrap_public_key(signature, encrypted_key):
+    return server_pub_key_token
 
 class CredSSPTests(unittest.TestCase):
     def test_auth_mechanism_ntlm(self):
@@ -57,6 +64,35 @@ class CredSSPTests(unittest.TestCase):
     def test_tlsv1_2_disabled(self, tls_version, tls_options, cipher_assert):
         # The testing is actually happening in the mocking functions
         HttpCredSSPAuth('', '', disable_tlsv1_2=True)
+
+    @mock.patch("ntlm_auth.session_security.SessionSecurity.unwrap", side_effect=mock_unwrap_public_key)
+    def test_verify_public_key_good(self, mock_unwrap):
+        test_credssp_context = HttpCredSSPAuth('', '')
+        test_ntlm_context = ntlm.Ntlm()
+        test_ntlm_context.session_security = session_security.SessionSecurity(1, 'key'.encode())
+        test_credssp_context.context = test_ntlm_context
+        test_ts_request = TSRequest()
+        test_ts_request.parse_data(public_key_ts_request)
+        test_public_key = hex_to_byte('00') + server_pub_key_token[1:]
+
+        test_credssp_context._verify_public_keys(test_public_key, test_ts_request)
+
+    @mock.patch("ntlm_auth.session_security.SessionSecurity.unwrap", side_effect=mock_unwrap_public_key)
+    def test_verify_public_key_invalid(self, mock_unwrap):
+        test_credssp_context = HttpCredSSPAuth('', '')
+        test_ntlm_context = ntlm.Ntlm()
+        test_ntlm_context.session_security = session_security.SessionSecurity(1, 'key'.encode())
+        test_credssp_context.context = test_ntlm_context
+        test_ts_request = TSRequest()
+        test_ts_request.parse_data(public_key_ts_request)
+
+        # Use the wrong first byte to ensure the keys don't match
+        test_public_key = hex_to_byte('01') + server_pub_key_token[1:]
+
+        with self.assertRaises(AssertionError) as context:
+            test_credssp_context._verify_public_keys(test_public_key, test_ts_request)
+
+        assert context.exception.args[0] == 'Could not verify key sent from the server, possibly man in the middle attack'
 
     def test_parse_username_with_backslash(self):
         test_username = 'DOMAIN\\USER'
@@ -140,5 +176,3 @@ class CredSSPTests(unittest.TestCase):
         HttpCredSSPAuth._set_credssp_token(test_request, 'test'.encode())
 
         assert test_request.headers['Authorization'] == 'CredSSP dGVzdA=='.encode()
-
-
