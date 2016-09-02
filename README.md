@@ -1,6 +1,8 @@
 requests-credssp
 ================
 
+[![Build Status](https://travis-ci.org/jborean93/requests-credssp.svg?branch=master)](https://travis-ci.org/jborean93/requests-credssp)[![Build status](https://ci.appveyor.com/api/projects/status/6osajucq8sf8aeed/branch/master?svg=true)](https://ci.appveyor.com/project/jborean93/requests-credssp/branch/master)[![Coverage Status](https://coveralls.io/repos/github/jborean93/requests-credssp/badge.svg?branch=master)](https://coveralls.io/github/jborean93/requests-credssp?branch=master)
+
 About this library
 ------------------
 
