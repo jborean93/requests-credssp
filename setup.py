@@ -6,7 +6,7 @@ from setuptools import setup
 setup(
     name='requests-credssp',
     version='0.0.1',
-    packages=[ 'requests-credssp' ],
+    packages=[ 'requests_credssp' ],
     install_requires=[ 'ntlm-auth',
                        'ordereddict',
                        'pyOpenSSL',

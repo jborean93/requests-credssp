@@ -47,9 +47,9 @@ Currently this is the only way to use CredSSP, there are plans in the future to 
 
 ```python
 import requests
-from requests_credssp import CredSSPAuth
+from requests_credssp import HttpCredSSPAuth
 
-credssp_auth = CredSSPAuth('domain\\user', 'password', auth_mechanism='ntlm')
+credssp_auth = HttpCredSSPAuth('domain\\user', 'password', auth_mechanism='ntlm')
 r = requests.get("https://server:5986/wsman", auth=credssp_auth)
 ...
 ```
@@ -60,9 +60,9 @@ There is an option to disable TLSv1.2 connections and revert back to TLSv1. Wind
 
 ```python
 import requests
-from requests_credssp import CredSSPAuth
+from requests_credssp import HttpCredSSPAuth
 
-credssp_auth = CredSSPAuth('domain\\user', 'password', auth_mechanism='ntlm', disable_tlsv1_2=True)
+credssp_auth = HttpCredSSPAuth('domain\\user', 'password', auth_mechanism='ntlm', disable_tlsv1_2=True)
 r = requests.get("https://server:5986/wsman", auth=credssp_auth)
 ...
 ```
@@ -71,8 +71,6 @@ Backlog
 -------
 * Add support for Kerberos authentication
 * Once above is added, auto detect which version to use, preference Kerberos over NTLM
-* Generic functions for other protocols to call to encrypt messages before sending over the wire
+* Support to encrypt/decrypt messages sent to and from the server
 * Replace dependency of pyOpenSSL if possible with inbuilt functions in Python
-* Create tests to test out the code
-* Fix up asn_structures and asn_helper to be more readable
 * Add support for different credential types like smart card and redirected credentials
