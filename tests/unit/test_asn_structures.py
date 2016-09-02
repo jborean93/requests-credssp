@@ -1,11 +1,10 @@
-import binascii
 import struct
 import unittest2 as unittest
 
 from requests_credssp.asn_structures import NegoData, TSRequest, TSCredentials, TSPasswordCreds
 from requests_credssp.exceptions import AsnStructureException, NTStatusException
 from tests.expectations import *
-from tests.utils import hex_to_byte, byte_to_hex
+from tests.utils import hex_to_byte
 
 class TestASNStructures(unittest.TestCase):
     def test_create_negotiate_nego_data(self):
@@ -105,6 +104,15 @@ class TestASNStructures(unittest.TestCase):
         actual.parse_data(actual_ts_request['nego_tokens'].value)
 
         assert expected == actual['nego_token'].value
+
+    def test_parse_ts_request_invalid_sequence(self):
+        test_data = hex_to_byte('30 13 A0 03 02 01 03 A6 03 02 01 01')
+
+        with self.assertRaises(AsnStructureException) as context:
+            test_ts_request = TSRequest()
+            test_ts_request.parse_data(test_data)
+
+        assert context.exception.args[0] == 'Unknown sequence byte (a6) in sequence'
 
     def test_parse_nego_data_wrong_sequence(self):
         test_data = hex_to_byte('30 05 A5 03 04 01 03')
