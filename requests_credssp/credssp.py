@@ -5,7 +5,11 @@ import struct
 try:
     from OpenSSL import SSL, _util
 except ImportError:
-    raise Exception("Cannot import pyOpenSSL")
+    try:
+        from OpenSSL import SSL
+        from OpenSSL import crypto as _util
+    except ImportError:
+        raise Exception("Cannot import pyOpenSSL")
 from ntlm_auth.ntlm import Ntlm
 from requests.auth import AuthBase
 
