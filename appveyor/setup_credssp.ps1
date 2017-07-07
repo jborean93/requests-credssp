@@ -22,7 +22,7 @@ function SetupUser() {
 
 function SetupWinRMWithCredSSP() {
     # Create a HTTP/HTTPS listener on WinRM
-    winrm quickconfig
+    winrm quickconfig -quiet
     $hostname = $env:computername
     $c = New-SelfSignedCertificate -DnsName $hostname -CertStoreLocation cert:\LocalMachine\My
     winrm create winrm/config/Listener?Address=*+Transport=HTTPS "@{Hostname=`"$hostname`";CertificateThumbprint=`"$($c.ThumbPrint)`"}"
