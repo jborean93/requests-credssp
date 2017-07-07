@@ -327,8 +327,9 @@ class HttpCredSSPAuth(AuthBase):
         :param data: a byte string of data to encrypt
         :return: a byte string of the encrypted data
         """
-        self.tls_connection.send(data)
+        length = self.tls_connection.send(data)
         encrypted_data = b''
+        counter = 0
 
         while True:
             try:
@@ -336,6 +337,13 @@ class HttpCredSSPAuth(AuthBase):
             except SSL.WantReadError:
                 break
             encrypted_data += encrypted_chunk
+
+            # in case of a borked TLS connection, break the loop if the current
+            # buffer counter is > the length of the original message plus the
+            # the size of the buffer (to be careful)
+            counter += self.BIO_BUFFER_SIZE
+            if counter > length + self.BIO_BUFFER_SIZE:
+                break
 
         return encrypted_data
 
@@ -347,8 +355,9 @@ class HttpCredSSPAuth(AuthBase):
         :param encrypted_data: the byte string of the encrypted data
         :return: a byte string of the decrypted data
         """
-        self.tls_connection.bio_write(encrypted_data)
+        length = self.tls_connection.bio_write(encrypted_data)
         data = b''
+        counter = 0
 
         while True:
             try:
@@ -356,6 +365,10 @@ class HttpCredSSPAuth(AuthBase):
             except SSL.WantReadError:
                 break
             data += data_chunk
+
+            counter += self.BIO_BUFFER_SIZE
+            if counter > length:
+                break
 
         return data
 

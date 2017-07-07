@@ -85,7 +85,7 @@ r = requests.get("https://server:5986/wsman", auth=credssp_auth)
 
 #### Message Encryption
 
-You can use this library to encrypt and decrypt messages sent ot and from the
+You can use this library to encrypt and decrypt messages sent to and from the
 server. Message encryption is done over the TLS channel that was negotiated in
 the authentication stage. The below is an example of encrypting and decrypting
 messages, note this is only a basic example and not a working script.
