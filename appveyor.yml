@@ -92,6 +92,7 @@ install:
   # pip will build them from source using the MSVC compiler matching the
   # target Python version and architecture
   - "%CMD_IN_ENV% pip install -r requirements-dev.txt"
+  - "%CMD_IN_ENV% pip install python-coveralls"
 
 build: false
 
@@ -101,6 +102,6 @@ before_test:
 
 test_script:
   # Run the project tests
-  - "%CMD_IN_ENV% py.test tests"
+  - "%CMD_IN_ENV% py.test --cov requests_credssp --cov-report term-missing tests"
 matrix:
   fast_finish: true
