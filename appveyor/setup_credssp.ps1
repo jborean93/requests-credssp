@@ -21,7 +21,8 @@ function SetupUser() {
 }
 
 function SetupWinRMWithCredSSP() {
-    # Create a HTTPS listener on WinRM
+    # Create a HTTP/HTTPS listener on WinRM
+    winrm quickconfig
     $hostname = $env:computername
     $c = New-SelfSignedCertificate -DnsName $hostname -CertStoreLocation cert:\LocalMachine\My
     winrm create winrm/config/Listener?Address=*+Transport=HTTPS "@{Hostname=`"$hostname`";CertificateThumbprint=`"$($c.ThumbPrint)`"}"
@@ -29,6 +30,7 @@ function SetupWinRMWithCredSSP() {
     # Enable CredSSP on WinRM listener
     Enable-WSManCredSSP -Role Server -Force
     Set-Item -Path "WSMan:\localhost\Service\Auth\CredSSP" -Value $true
+    Set-Item -Path "WSMan:\localhost\Service\AllowUnencrypted" -Value $false
 }
 
 function main() {

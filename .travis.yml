@@ -6,10 +6,12 @@ python:
   - "3.3"
   - "3.4"
   - "3.5"
+  - "3.6"
 
 # command to install dependencies
 install:
-  - python setup.py install
+  - pip install -U pip setuptools
+  - pip install .
   - pip install -r requirements-dev.txt
   - pip install python-coveralls
 
