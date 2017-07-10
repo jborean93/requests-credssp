@@ -116,6 +116,17 @@ encrypted_response = response.content
 decrypted_response = session.auth.unwrap(encrypted_response)
 ```
 
+## Logging
+
+This library uses the standard Python logging facilities. Log messages are
+logged to the `requests_credssp` and `requests_credssp.credssp` named loggers.
+
+If you are receiving any errors or wish to debug the CredSSP process you should
+enable DEBUG level logs. These logs show fine grain information such as the
+protocol and cipher negotiated in the TLS handshake as well as any non
+confidential data such as the 1st 2 NTLM messages sent and received in the auth
+process.
+
 
 ## Backlog
 
