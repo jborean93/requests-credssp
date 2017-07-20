@@ -65,6 +65,9 @@ class HttpCredSSPAuth(AuthBase):
         self.tls_context.set_cipher_list(b'ALL')
         self.tls_connection = None
 
+        # used when calculating the trailer length for WinRM
+        self.cipher_negotiated = None
+
     def __call__(self, request):
         request.headers["Connection"] = "Keep-Alive"
         request.register_hook('response', self.response_hook)
@@ -147,6 +150,7 @@ class HttpCredSSPAuth(AuthBase):
             else:
                 break
 
+        self.cipher_negotiated = self.tls_connection.get_cipher_name()
         log.debug("_start_tls_handshake(): Handshake complete. Protocol: %s, Cipher: %s" % (
                 self.tls_connection.get_protocol_version_name(), self.tls_connection.get_cipher_name()))
 

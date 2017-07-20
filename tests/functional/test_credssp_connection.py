@@ -1,4 +1,5 @@
 import unittest2 as unittest
+import re
 import requests_credssp
 import requests
 import struct
@@ -81,6 +82,7 @@ def send_request(url, username, password):
             <s:Body/>
         </s:Envelope>""" % (url)
     encrypted_message = session.auth.wrap(config_message)
+    trailer_length = get_trailer_length(len(config_message), session.auth.cipher_negotiated)
 
     message_payload = b"--Encrypted Boundary\r\n" \
                       b"\tContent-Type: application/HTTP-CredSSP-session-encrypted\r\n" \
@@ -89,7 +91,7 @@ def send_request(url, username, password):
                       b"\r\n" \
                       b"--Encrypted Boundary\r\n" \
                       b"\tContent-Type: application/octet-stream\r\n" + \
-                      struct.pack("<i", len(encrypted_message) - len(config_message) - 21) + encrypted_message + \
+                      struct.pack("<i", trailer_length) + encrypted_message + \
                       b"--Encrypted Boundary--\r\n"
 
     request = requests.Request('POST', url, data=message_payload)
@@ -108,3 +110,47 @@ def send_request(url, username, password):
 
     return decrypted_response
 
+def get_trailer_length(message_length, cipher_suite):
+    # I really don't like the way this works but can't find a better way, MS
+    # allows you to get this info through the struct SecPkgContext_StreamSizes
+    # but there is no GSSAPI/OpenSSL equivalent so we need to calculate it
+    # ourselves
+
+    if re.match('^.*-GCM-[\w\d]*$', cipher_suite):
+        # We are using GCM for the cipher suite, GCM has a fixed length of 16
+        # bytes for the TLS trailer making it easy for us
+        trailer_length = 16
+    else:
+        # We are not using GCM so need to calculate the trailer size. The
+        # trailer length is equal to the length of the hmac + the length of the
+        # padding required by the block cipher
+        hash_algorithm = cipher_suite.split('-')[-1]
+
+        # while there are other algorithms, SChannel doesn't support them
+        # as of yet https://msdn.microsoft.com/en-us/library/windows/desktop/aa374757(v=vs.85).aspx
+        if hash_algorithm == 'MD5':
+            hash_length = 16
+        elif hash_algorithm == 'SHA':
+            hash_length = 20
+        elif hash_algorithm == 'SHA256':
+            hash_length = 32
+        elif hash_algorithm == 'SHA384':
+            hash_length = 48
+        else:
+            hash_length = 0
+
+        pre_pad_length = message_length + hash_length
+
+        if "RC4" in cipher_suite:
+            # RC4 is a stream cipher so no padding would be added
+            padding_length = 0
+        elif "3DES" in cipher_suite:
+            # 3DES is a 64 bit block cipher
+            padding_length = 8 - (pre_pad_length % 8)
+        else:
+            # AES is a 128 bit block cipher
+            padding_length = 16 - (pre_pad_length % 16)
+
+        trailer_length = (pre_pad_length + padding_length) - message_length
+
+    return trailer_length
