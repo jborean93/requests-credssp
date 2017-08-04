@@ -1,4 +1,5 @@
 import base64
+import logging
 import re
 import struct
 
@@ -16,8 +17,12 @@ from requests.auth import AuthBase
 from requests_credssp.asn_structures import TSCredentials, TSRequest, TSPasswordCreds, NegoData
 from requests_credssp.exceptions import AuthenticationException, InvalidConfigurationException
 
+log = logging.getLogger(__name__)
 
 class HttpCredSSPAuth(AuthBase):
+
+    BIO_BUFFER_SIZE = 8192
+
     def __init__(self, username, password, auth_mechanism='ntlm', disable_tlsv1_2=False):
         """
         Initialises the CredSSP auth handler for dealing with requests.
@@ -28,6 +33,7 @@ class HttpCredSSPAuth(AuthBase):
         :param disable_tlsv1_2: Disable TLSv1.2 authentication and revert back to TLSv1.
         """
         self.domain, self.user = self._parse_username(username)
+        log.debug("The credentials that will be used in the auth, DOMAIN: '%s', USER: '%s'" % (self.domain, self.user))
         self.password = password
 
         if auth_mechanism == 'ntlm':
@@ -47,6 +53,7 @@ class HttpCredSSPAuth(AuthBase):
             If you do not wish to do this you can set the disable_tlsv1_2 flag to true when calling CredSSP (NOT
             RECOMMENDED).
             """
+            log.debug("disable_tlsv1_2 is set to False, disabling TLSv1.2 support and reverting back to TLSv1")
             self.tls_context = SSL.Context(SSL.TLSv1_METHOD)
 
             # Revert OpenSSL fix to CBC ciphers due to incompatibility with MS TLS 1.0 implementation
@@ -55,8 +62,11 @@ class HttpCredSSPAuth(AuthBase):
         else:
             self.tls_context = SSL.Context(SSL.TLSv1_2_METHOD)
 
-        self.tls_context.set_cipher_list('ALL')
+        self.tls_context.set_cipher_list(b'ALL')
         self.tls_connection = None
+
+        # used when calculating the trailer length for WinRM
+        self.cipher_negotiated = None
 
     def __call__(self, request):
         request.headers["Connection"] = "Keep-Alive"
@@ -84,7 +94,7 @@ class HttpCredSSPAuth(AuthBase):
         :param kwargs: The requests kwargs from the original response
         :return: The final response from the server after successful authentication, status code 200
         """
-        #1. Complete TLS Handshake
+        # 1. Complete TLS Handshake
         self._start_tls_handshake(response, **kwargs)
 
         # 2. Creates the authentication token to send to the server in conjunction with Step 3
@@ -122,13 +132,13 @@ class HttpCredSSPAuth(AuthBase):
         self.tls_connection = SSL.Connection(self.tls_context)
         self.tls_connection.set_connect_state()
 
-        # Complete the handshake and receive the CredSSP token from the server
+        log.debug("_start_tls_handshake(): Starting TLS handshake with server")
         while True:
             try:
                 self.tls_connection.do_handshake()
             except SSL.WantReadError:
                 request = response.request.copy()
-                credssp_token = self.tls_connection.bio_read(8192)
+                credssp_token = self.tls_connection.bio_read(self.BIO_BUFFER_SIZE)
                 self._set_credssp_token(request, credssp_token)
 
                 response = response.connection.send(request, **kwargs)
@@ -139,6 +149,10 @@ class HttpCredSSPAuth(AuthBase):
                 self.tls_connection.bio_write(server_credssp_token)
             else:
                 break
+
+        self.cipher_negotiated = self.tls_connection.get_cipher_name()
+        log.debug("_start_tls_handshake(): Handshake complete. Protocol: %s, Cipher: %s" % (
+                self.tls_connection.get_protocol_version_name(), self.tls_connection.get_cipher_name()))
 
     def _get_authentication_token(self, response, server_certificate, **kwargs):
         """
@@ -157,8 +171,9 @@ class HttpCredSSPAuth(AuthBase):
 
         # TODO: Add support for Kerberos authentication and not just NTLM
 
-        # NTLM: Create the negotiate token and attach to the initial TSRequest to the server
+        log.debug("_get_authentication_token(): creating NTLM negotiate token and add it to the initial TSRequest")
         negotiate_token = self.context.create_negotiate_message(self.domain).decode('ascii')
+        log.debug("_get_authentication_token(): NTLM Negotiate Token: %s" % negotiate_token)
         negotiate_token = base64.b64decode(negotiate_token)
 
         negotiate_nego_data = NegoData()
@@ -166,28 +181,30 @@ class HttpCredSSPAuth(AuthBase):
         negotiate_ts_request = TSRequest()
         negotiate_ts_request['nego_tokens'].value = negotiate_nego_data.get_data()
 
-        self.tls_connection.send(negotiate_ts_request.get_data())
-        negotiate_credssp_token = self.tls_connection.bio_read(8192)
+        negotiate_credssp_token = self.wrap(negotiate_ts_request.get_data())
         negotiate_request = response.request.copy()
         self._set_credssp_token(negotiate_request, negotiate_credssp_token)
 
-        # NTLM: Get the challenge token from the server and parse it in the ntlm context
+        log.debug("_get_authentication_token(): get NTLM challenge token from the "
+                  "server and add it to the ntlm context")
         challenge_response = response.connection.send(negotiate_request, **kwargs)
         challenge_response.content
         challenge_response.raw.release_conn()
         challenge_credssp_token = self._get_credssp_token(challenge_response)
-        self.tls_connection.bio_write(challenge_credssp_token)
+        challenge_ts_request_data = self.unwrap(challenge_credssp_token)
 
         challenge_ts_request = TSRequest()
-        challenge_ts_request.parse_data(self.tls_connection.recv(8192))
+        challenge_ts_request.parse_data(challenge_ts_request_data)
         challenge_ts_request.check_error_code()
 
         challenge_nego_data = NegoData()
         challenge_nego_data.parse_data(challenge_ts_request['nego_tokens'].value)
         challenge_token = challenge_nego_data['nego_token'].value
-        self.context.parse_challenge_message(base64.b64encode(challenge_token))
+        encoded_challenge_token = base64.b64encode(challenge_token)
+        log.debug("_get_authentication_token(): NTLM Challenge Token: %s" % encoded_challenge_token)
+        self.context.parse_challenge_message(encoded_challenge_token)
 
-        # NTLM: Create the authenticate token
+        log.debug("_get_authentication_token(): create NTLM authentication token")
         server_cert_hash = server_certificate.digest('SHA256').decode().replace(':', '')
         authenticate_token = self.context.create_authenticate_message(self.user, self.password, self.domain,
                                                                       server_certificate_hash=server_cert_hash)
@@ -213,7 +230,7 @@ class HttpCredSSPAuth(AuthBase):
         if self.context.session_security is None:
             raise Exception("No session security was negotiated during the auth process. Cannot encrypt certificate")
 
-        # Generate the encrypted public key data and TSRequest to send to the server
+        log.debug("_send_auth_response(): Generate the encrypted public key data and add it to the TSRequest")
         encrypted_public_key, public_key_signature = self.context.session_security.wrap(server_public_key)
 
         auth_nego_data = NegoData()
@@ -223,22 +240,22 @@ class HttpCredSSPAuth(AuthBase):
         ts_request['nego_tokens'].value = auth_nego_data.get_data()
         ts_request['pub_key_auth'].value = public_key_signature + encrypted_public_key
 
-        # Send the TSRequest structure containing the final auth token and public key info
-        self.tls_connection.send(ts_request.get_data())
-        auth_credssp_token = self.tls_connection.bio_read(8192)
+        log.debug("_send_auth_response(): Send TSRequest structure containing "
+                  "the final auth token and public key info")
+        auth_credssp_token = self.wrap(ts_request.get_data())
 
         request = response.request.copy()
         self._set_credssp_token(request, auth_credssp_token)
 
-        # Get the public key structure response from the server
+        log.debug("_send_auth_response(): Get the public key structure response from the server")
         response = response.connection.send(request, **kwargs)
         response.content
         response.raw.release_conn()
         public_key_credssp_token = self._get_credssp_token(response)
-        self.tls_connection.bio_write(public_key_credssp_token)
+        public_key_requests_data = self.unwrap(public_key_credssp_token)
 
         public_key_ts_request = TSRequest()
-        public_key_ts_request.parse_data(self.tls_connection.recv(8192))
+        public_key_ts_request.parse_data(public_key_requests_data)
         public_key_ts_request.check_error_code()
 
         if public_key_ts_request['pub_key_auth'].value is None:
@@ -261,7 +278,7 @@ class HttpCredSSPAuth(AuthBase):
         :param expected_key: The ASN.1 encoded SubjectPublicKey field of the server X509 certificate
         :param public_key_ts_request: The TSRequest structure received from the server for host verification
         """
-        # Get the raw public key from the server and decrypt it
+        log.debug("_verify_public_keys(): Get raw public key from the server and decrypt it for verification")
         raw_public_key = public_key_ts_request['pub_key_auth'].value
 
         # For NTLM signatures are always 16 bytes long, is it the same for Kerberos?
@@ -281,6 +298,7 @@ class HttpCredSSPAuth(AuthBase):
 
         assert actual_key == expected_key, "Could not verify key sent from the server, " \
                                            "possibly man in the middle attack"
+        log.debug("_verify_public_keys(): verification of the server's public key is successful")
 
     def _send_encrypted_credentials(self, response, **kwargs):
         """
@@ -288,7 +306,7 @@ class HttpCredSSPAuth(AuthBase):
 
         3.1.5 Processing Events and Sequencing Rules - Step 5
         After the client has verified the server's authenticity, it encrypts the user's credentials with the
-        authentication protocol's encryption services. THe resulting value is encapsulated in the authInfo field of the
+        authentication protocol's encryption services. The resulting value is encapsulated in the authInfo field of the
         TSRequest structure and sent over the encrypted TLS channel to the server
 
         :param response: The response from the server after completing the TLS handshake
@@ -309,14 +327,68 @@ class HttpCredSSPAuth(AuthBase):
         encrypted_credential, encrypted_credential_sig = self.context.session_security.wrap(ts_credentials.get_data())
         credential_ts_request['auth_info'].value = encrypted_credential_sig + encrypted_credential
 
-        self.tls_connection.send(credential_ts_request.get_data())
-        credential_credssp_token = self.tls_connection.bio_read(8192)
+        credential_credssp_token = self.wrap(credential_ts_request.get_data())
         request = response.request.copy()
         self._set_credssp_token(request, credential_credssp_token)
 
+        log.info("_send_encrypted_credentials(): Sending the encrypted credentials to the server")
         response = response.connection.send(request, **kwargs)
 
         return response
+
+    def wrap(self, data):
+        """
+        Encrypts the data in preparation for sending to the server. The data is
+        encrypted using the TLS channel negotiated between the client and the
+        server.
+
+        :param data: a byte string of data to encrypt
+        :return: a byte string of the encrypted data
+        """
+        length = self.tls_connection.send(data)
+        encrypted_data = b''
+        counter = 0
+
+        while True:
+            try:
+                encrypted_chunk = self.tls_connection.bio_read(self.BIO_BUFFER_SIZE)
+            except SSL.WantReadError:
+                break
+            encrypted_data += encrypted_chunk
+
+            # in case of a borked TLS connection, break the loop if the current
+            # buffer counter is > the length of the original message plus the
+            # the size of the buffer (to be careful)
+            counter += self.BIO_BUFFER_SIZE
+            if counter > length + self.BIO_BUFFER_SIZE:
+                break
+
+        return encrypted_data
+
+    def unwrap(self, encrypted_data):
+        """
+        Decrypts the data send by the server using the TLS channel negotiated
+        between the client and the server.
+
+        :param encrypted_data: the byte string of the encrypted data
+        :return: a byte string of the decrypted data
+        """
+        length = self.tls_connection.bio_write(encrypted_data)
+        data = b''
+        counter = 0
+
+        while True:
+            try:
+                data_chunk = self.tls_connection.recv(self.BIO_BUFFER_SIZE)
+            except SSL.WantReadError:
+                break
+            data += data_chunk
+
+            counter += self.BIO_BUFFER_SIZE
+            if counter > length:
+                break
+
+        return data
 
     @staticmethod
     def _parse_username(username):

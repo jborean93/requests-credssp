@@ -21,7 +21,7 @@ def assert_tlsv1_options(options):
     assert options == 0x00000800 | 0x00000200
 
 def assert_ciphers_all(cipher):
-    assert cipher == 'ALL'
+    assert cipher == b'ALL'
 
 def mock_unwrap_public_key(signature, encrypted_key):
     return server_pub_key_token
