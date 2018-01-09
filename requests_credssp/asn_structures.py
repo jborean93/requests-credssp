@@ -90,7 +90,7 @@ class TSRequest(asn_helper.ASN1Sequence):
         of what went wrong. This method will check if the error code exists and throw an exception if
         it does.
         """
-        if self['version'].value == struct.pack('B', 3):
+        if self['version'].value >= struct.pack('B', 3):
             error_code = self['error_code'].value
             if error_code is not None:
                 hex_error = binascii.hexlify(error_code)

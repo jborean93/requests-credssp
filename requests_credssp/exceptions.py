@@ -1,6 +1,8 @@
 class NTStatusCodes(object):
     # TODO: Fill in more exception types as they are found
+    STATUS_INVALID_HANDLE = b'c0000008'
     STATUS_LOGON_FAILURE = b'c000006d'
+
 
 def parse_nt_status_exceptions(hex_code):
     """

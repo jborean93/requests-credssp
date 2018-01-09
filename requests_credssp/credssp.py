@@ -14,6 +14,13 @@ except ImportError:
 from ntlm_auth.ntlm import Ntlm
 from requests.auth import AuthBase
 
+HAS_KERBEROS = False
+try:
+    import gssapi
+    HAS_KERBEROS = True
+except ImportError:
+    pass
+
 from requests_credssp.asn_structures import TSCredentials, TSRequest, TSPasswordCreds, NegoData
 from requests_credssp.exceptions import AuthenticationException, InvalidConfigurationException
 
@@ -99,11 +106,12 @@ class HttpCredSSPAuth(AuthBase):
 
         # 2. Creates the authentication token to send to the server in conjunction with Step 3
         server_certificate = self.tls_connection.get_peer_certificate()
-        authenticate_token = self._get_authentication_token(response, server_certificate, **kwargs)
+        #authenticate_token = self._get_authentication_token(response, server_certificate, **kwargs)
+        context, authenticate_token = self._get_authentication_token_kerb(response, **kwargs)
 
         # 3. Encrypt the public key and send in conjunction with the authentication token to the server
         server_public_key = self._get_rsa_public_key(server_certificate)
-        public_key_ts_request = self._send_auth_response(response, authenticate_token, server_public_key, **kwargs)
+        public_key_ts_request = self._send_auth_response(response, context, authenticate_token, server_public_key, **kwargs)
 
         # 4. Verify server's public key response to thwart man in the middle attacks
         self._verify_public_keys(server_public_key, public_key_ts_request)
@@ -153,6 +161,49 @@ class HttpCredSSPAuth(AuthBase):
         self.cipher_negotiated = self.tls_connection.get_cipher_name()
         log.debug("_start_tls_handshake(): Handshake complete. Protocol: %s, Cipher: %s" % (
                 self.tls_connection.get_protocol_version_name(), self.tls_connection.get_cipher_name()))
+
+    def _get_authentication_token_kerb(self, response, **kwargs):
+        name = gssapi.Name('vagrant-domain@DOMAIN.LOCAL', name_type=gssapi.NameType.kerberos_principal)
+        server_name = gssapi.Name('HTTP/SERVER2016@DOMAIN.LOCAL', name_type=gssapi.NameType.kerberos_principal)
+        cred = gssapi.Credentials(usage='initiate', name=name)
+        flags = [
+            gssapi.RequirementFlag.mutual_authentication,
+            gssapi.RequirementFlag.out_of_sequence_detection
+        ]
+
+        context = gssapi.SecurityContext(name=server_name, creds=cred, usage='initiate', flags=flags)
+
+        initial_client_token = context.step()
+
+        negotiate_nego_data = NegoData()
+        negotiate_nego_data['nego_token'].value = initial_client_token
+        negotiate_ts_request = TSRequest()
+        negotiate_ts_request['nego_tokens'].value = negotiate_nego_data.get_data()
+
+        negotiate_credssp_token = self.wrap(negotiate_ts_request.get_data())
+        negotiate_request = response.request.copy()
+        self._set_credssp_token(negotiate_request, negotiate_credssp_token)
+
+        response2 = response.connection.send(negotiate_request, **kwargs)
+        response2.content
+        response2.raw.release_conn()
+        response_token = self._get_credssp_token(response2)
+        response_ts_request_data = self.unwrap(response_token)
+
+        response_ts_request = TSRequest()
+        response_ts_request.parse_data(response_ts_request_data)
+        response_ts_request.check_error_code()
+
+        response_nego_data = NegoData()
+        response_nego_data.parse_data(response_ts_request['nego_tokens'].value)
+        kerb_resp_token = response_nego_data['nego_token'].value
+
+        next_token = context.step(kerb_resp_token)
+
+        if not context.complete:
+            raise Exception("Handle this better")
+
+        return context, initial_client_token
 
     def _get_authentication_token(self, response, server_certificate, **kwargs):
         """
@@ -212,7 +263,7 @@ class HttpCredSSPAuth(AuthBase):
 
         return authenticate_token
 
-    def _send_auth_response(self, response, authenticate_token, server_public_key, **kwargs):
+    def _send_auth_response(self, response, context, authenticate_token, server_public_key, **kwargs):
         """
         [MS-CSSP] v13.0 2016-07-14
 
@@ -227,18 +278,21 @@ class HttpCredSSPAuth(AuthBase):
         :param kwargs: The requests kwargs from the original response
         :return: The TSRequest structure send from the server containing the pubKeyAuth for client to verify
         """
-        if self.context.session_security is None:
-            raise Exception("No session security was negotiated during the auth process. Cannot encrypt certificate")
+        #if self.context.session_security is None:
+        #    raise Exception("No session security was negotiated during the auth process. Cannot encrypt certificate")
 
         log.debug("_send_auth_response(): Generate the encrypted public key data and add it to the TSRequest")
-        encrypted_public_key, public_key_signature = self.context.session_security.wrap(server_public_key)
+        encrypted_public_key = context.wrap(server_public_key, True)
+        #encrypted_public_key, public_key_signature = self.context.session_security.wrap(server_public_key)
+        encrypted_public_key = gssapi.raw.wrap(context, server_public_key, True, 0)
 
         auth_nego_data = NegoData()
         auth_nego_data['nego_token'].value = authenticate_token
 
         ts_request = TSRequest()
         ts_request['nego_tokens'].value = auth_nego_data.get_data()
-        ts_request['pub_key_auth'].value = public_key_signature + encrypted_public_key
+        #ts_request['pub_key_auth'].value = public_key_signature + encrypted_public_key
+        ts_request['pub_key_auth'].value = encrypted_public_key.message
 
         log.debug("_send_auth_response(): Send TSRequest structure containing "
                   "the final auth token and public key info")
