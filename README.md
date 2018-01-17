@@ -31,6 +31,11 @@ sudo apt-get install gcc python-dev libssl-dev
 sudo yum install gcc python-devel openssl-devel
 ```
 
+```bash
+
+sudo dnf install gssntlmssp
+```
+
 To install, use pip:
 
 ```bash

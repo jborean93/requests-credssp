@@ -7,9 +7,9 @@ import struct
 from requests_credssp.exceptions import NTStatusException
 from xml.etree import ElementTree as ET
 
-username = '.\\User'
-password = 'Password01'
-url = '{0}://127.0.0.1:{1}/wsman'
+username = 'vagrant-domain@DOMAIN.LOCAL'
+password = 'VagrantPass1'
+url = '{0}://DC01.domain.local:{1}/wsman'
 
 """
 This is a test with a real WinRM instance on a Windows server to test out the CredSSP authentication.

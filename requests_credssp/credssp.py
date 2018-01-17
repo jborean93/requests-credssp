@@ -39,6 +39,7 @@ class HttpCredSSPAuth(AuthBase):
         :param auth_mechanism: The authentication mechanism (ntlm, kerberos) - Only NTLM is implemented so far
         :param disable_tlsv1_2: Disable TLSv1.2 authentication and revert back to TLSv1.
         """
+        self.username = username
         self.domain, self.user = self._parse_username(username)
         log.debug("The credentials that will be used in the auth, DOMAIN: '%s', USER: '%s'" % (self.domain, self.user))
         self.password = password
@@ -104,9 +105,15 @@ class HttpCredSSPAuth(AuthBase):
         # 1. Complete TLS Handshake
         self._start_tls_handshake(response, **kwargs)
 
+        from requests_credssp.spnego import SpnegoContext
+        sec_context = SpnegoContext(response, self.username, self.password)
+        sec_context.negotiate_auth_mech(self, **kwargs)
+
         # 2. Creates the authentication token to send to the server in conjunction with Step 3
         server_certificate = self.tls_connection.get_peer_certificate()
         #authenticate_token = self._get_authentication_token(response, server_certificate, **kwargs)
+
+        #context, authenticate_token = self._get_authentication_token_kerb2(response, **kwargs)
         context, authenticate_token = self._get_authentication_token_kerb(response, **kwargs)
 
         # 3. Encrypt the public key and send in conjunction with the authentication token to the server
@@ -114,10 +121,10 @@ class HttpCredSSPAuth(AuthBase):
         public_key_ts_request = self._send_auth_response(response, context, authenticate_token, server_public_key, **kwargs)
 
         # 4. Verify server's public key response to thwart man in the middle attacks
-        self._verify_public_keys(server_public_key, public_key_ts_request)
+        self._verify_public_keys(context, server_public_key, public_key_ts_request)
 
         # 5. Send encrypted credentials to the server
-        final_response = self._send_encrypted_credentials(response, **kwargs)
+        final_response = self._send_encrypted_credentials(context, response, **kwargs)
         final_response.history.append(response)
 
         return final_response
@@ -164,46 +171,38 @@ class HttpCredSSPAuth(AuthBase):
 
     def _get_authentication_token_kerb(self, response, **kwargs):
         name = gssapi.Name('vagrant-domain@DOMAIN.LOCAL', name_type=gssapi.NameType.kerberos_principal)
-        server_name = gssapi.Name('HTTP/SERVER2016@DOMAIN.LOCAL', name_type=gssapi.NameType.kerberos_principal)
+        server_name = gssapi.Name('HTTP/DC01.domain.local@DOMAIN.LOCAL', name_type=gssapi.NameType.kerberos_principal)
         cred = gssapi.Credentials(usage='initiate', name=name)
-        flags = [
-            gssapi.RequirementFlag.mutual_authentication,
-            gssapi.RequirementFlag.out_of_sequence_detection
-        ]
 
-        context = gssapi.SecurityContext(name=server_name, creds=cred, usage='initiate', flags=flags)
+        context = gssapi.SecurityContext(name=server_name, creds=cred, usage='initiate')
 
-        initial_client_token = context.step()
+        out_token = context.step()
+        while not context.complete:
+            nego_data = NegoData()
+            nego_data['nego_token'].value = out_token
+            ts_request = TSRequest()
+            ts_request['nego_tokens'].value = nego_data.get_data()
 
-        negotiate_nego_data = NegoData()
-        negotiate_nego_data['nego_token'].value = initial_client_token
-        negotiate_ts_request = TSRequest()
-        negotiate_ts_request['nego_tokens'].value = negotiate_nego_data.get_data()
+            credssp_token = self.wrap(ts_request.get_data())
+            auth_request = response.request.copy()
+            self._set_credssp_token(auth_request, credssp_token)
 
-        negotiate_credssp_token = self.wrap(negotiate_ts_request.get_data())
-        negotiate_request = response.request.copy()
-        self._set_credssp_token(negotiate_request, negotiate_credssp_token)
+            response = response.connection.send(auth_request, **kwargs)
+            response.content
+            response.raw.release_conn()
+            response_token = self._get_credssp_token(response)
+            response_token_data = self.unwrap(response_token)
 
-        response2 = response.connection.send(negotiate_request, **kwargs)
-        response2.content
-        response2.raw.release_conn()
-        response_token = self._get_credssp_token(response2)
-        response_ts_request_data = self.unwrap(response_token)
+            ts_request = TSRequest()
+            ts_request.parse_data(response_token_data)
+            ts_request.check_error_code()
 
-        response_ts_request = TSRequest()
-        response_ts_request.parse_data(response_ts_request_data)
-        response_ts_request.check_error_code()
+            nego_data = NegoData()
+            nego_data.parse_data(ts_request['nego_tokens'].value)
+            in_token = nego_data['nego_token'].value
+            out_token = context.step(token=in_token)
 
-        response_nego_data = NegoData()
-        response_nego_data.parse_data(response_ts_request['nego_tokens'].value)
-        kerb_resp_token = response_nego_data['nego_token'].value
-
-        next_token = context.step(kerb_resp_token)
-
-        if not context.complete:
-            raise Exception("Handle this better")
-
-        return context, initial_client_token
+        return context, out_token
 
     def _get_authentication_token(self, response, server_certificate, **kwargs):
         """
@@ -282,17 +281,18 @@ class HttpCredSSPAuth(AuthBase):
         #    raise Exception("No session security was negotiated during the auth process. Cannot encrypt certificate")
 
         log.debug("_send_auth_response(): Generate the encrypted public key data and add it to the TSRequest")
-        encrypted_public_key = context.wrap(server_public_key, True)
-        #encrypted_public_key, public_key_signature = self.context.session_security.wrap(server_public_key)
-        encrypted_public_key = gssapi.raw.wrap(context, server_public_key, True, 0)
 
-        auth_nego_data = NegoData()
-        auth_nego_data['nego_token'].value = authenticate_token
+        # python-gssapi wrap
+        enc = gssapi.raw.wrap(context, server_public_key, True, 0)
+        encrypted_public_key = enc.message
 
         ts_request = TSRequest()
-        ts_request['nego_tokens'].value = auth_nego_data.get_data()
-        #ts_request['pub_key_auth'].value = public_key_signature + encrypted_public_key
-        ts_request['pub_key_auth'].value = encrypted_public_key.message
+        ts_request['pub_key_auth'].value = encrypted_public_key
+
+        if authenticate_token is not None:
+            auth_nego_data = NegoData()
+            auth_nego_data['nego_token'].value = authenticate_token
+            ts_request['nego_tokens'].value = auth_nego_data.get_data()
 
         log.debug("_send_auth_response(): Send TSRequest structure containing "
                   "the final auth token and public key info")
@@ -317,7 +317,7 @@ class HttpCredSSPAuth(AuthBase):
 
         return public_key_ts_request
 
-    def _verify_public_keys(self, expected_key, public_key_ts_request):
+    def _verify_public_keys(self, context, expected_key, public_key_ts_request):
         """
         [MS-CSSP] v13.0 2016-07-14
 
@@ -336,9 +336,13 @@ class HttpCredSSPAuth(AuthBase):
         raw_public_key = public_key_ts_request['pub_key_auth'].value
 
         # For NTLM signatures are always 16 bytes long, is it the same for Kerberos?
-        public_key_signature = raw_public_key[:16]
-        encrypted_public_key = raw_public_key[16:]
-        public_key = self.context.session_security.unwrap(encrypted_public_key, public_key_signature)
+        #public_key_signature = raw_public_key[:16]
+        #encrypted_public_key = raw_public_key[16:]
+        #public_key = self.context.session_security.unwrap(encrypted_public_key, public_key_signature)
+
+        # KERBEROS
+        public_key = context.unwrap(raw_public_key)
+        public_key = public_key.message
 
         # Get the first byte from the server public key and subtract it by 1
         first_byte = public_key[0]
@@ -354,7 +358,7 @@ class HttpCredSSPAuth(AuthBase):
                                            "possibly man in the middle attack"
         log.debug("_verify_public_keys(): verification of the server's public key is successful")
 
-    def _send_encrypted_credentials(self, response, **kwargs):
+    def _send_encrypted_credentials(self, context, response, **kwargs):
         """
         [MS-CSSP] v13.0 2016-07-14
 
@@ -378,8 +382,13 @@ class HttpCredSSPAuth(AuthBase):
         ts_credentials['credentials'].value = ts_password_credentials.get_data()
 
         credential_ts_request = TSRequest()
-        encrypted_credential, encrypted_credential_sig = self.context.session_security.wrap(ts_credentials.get_data())
-        credential_ts_request['auth_info'].value = encrypted_credential_sig + encrypted_credential
+        # NTLM
+        #encrypted_credential, encrypted_credential_sig = self.context.session_security.wrap(ts_credentials.get_data())
+        #credential_ts_request['auth_info'].value = encrypted_credential_sig + encrypted_credential
+
+        # KERBEROS
+        encrypted_credential = context.wrap(ts_credentials.get_data(), True)
+        credential_ts_request['auth_info'].value = encrypted_credential.message
 
         credential_credssp_token = self.wrap(credential_ts_request.get_data())
         request = response.request.copy()
