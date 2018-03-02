@@ -11,8 +11,6 @@ environment:
 
   matrix:
   # https://www.appveyor.com/docs/installed-software/#python
-  - PYTHON: Python26
-  - PYTHON: Python26-x64
   - PYTHON: Python27
   - PYTHON: Python27-x64
   - PYTHON: Python34
