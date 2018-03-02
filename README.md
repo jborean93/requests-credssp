@@ -12,14 +12,14 @@ be delegated to a server giving you double hop authentication.
 
 ## Features
 
-Currently only CredSSP is supported through NTLM with later plans on adding
-support for Kerberos. CredSSP allows you to connect and delegate your
-credentials to a computer that has CredSSP enabled.
+Supports authenticating with a Windows server using the CredSSP protocol. This
+authentication uses either NTLM or Kerberos to initially authenticate a user
+before delegating the credentials to the server.
 
 
 ## Installation
 
-requests-credssp supports Python 2.6, 2.7 and 3.3+
+requests-credssp supports Python 2.6, 2.7 and 3.4+
 
 Before installing the following packages need to be installed on the system
 
@@ -31,38 +31,72 @@ sudo apt-get install gcc python-dev libssl-dev
 sudo yum install gcc python-devel openssl-devel
 ```
 
-```bash
-
-sudo dnf install gssntlmssp
-```
-
 To install, use pip:
 
-```bash
-pip install requests-credssp
-```
+`pip install requests-credssp`
 
 To install from source, download the source code, then run:
 
-```bash
-python setup.py install
-```
+`pip install .`
 
 
 ## Requirements
 
 - ntlm-auth
-- ordereddict (Python 2.6 Only)
 - pyOpenSSL>=16.0.0
 - requests>=2.0.0
+- ordereddict (Python 2.6 Only)
+- gssapi (Kerberos auth with non Windows hosts)
 
 
 ## Usage
 
+By default CredSSP will attempt to authenticate over a TLS 1.2 connection with
+either Kerberos or NTLM auth. Kerberos or NTLM is chosen based on the host
+setup with NTLM being a fallback. The following requirements must be met for
+Kerberos to be used;
+
+* The kerberos system extensions are installed
+* [python-gssapi](https://github.com/pythongssapi/python-gssapi) is installed
+* Kerberos is configured to talk to the domain/realm
+* The username is in the UPN form `username@REALM.COM`
+* The FQDN is used when connecting to the server
+
+You can force requests-credssp to use Kerberos or CredSSP by passing in
+`auth_mechanism=<type>` in the constructor. See the examples below for more
+details.
+
+#### Defaults
+
+Will connect over TLS 1.2 and attempt to authenticate with Kerberos with NTLM
+being a fallback if that fails.
+
+```python
+import requests
+from requests_credssp import HttpCredSSPAuth
+
+credssp_auth = HttpCredSSPAuth('domain\\user', 'password')
+r = requests.get("https://server:5986/wsman", auth=credssp_auth)
+...
+```
+
+#### With Kerberos Auth
+
+Will connect over TLS 1.2 and only authenticate with Kerberos. NTLM will not be
+used as a fallback if that fails.
+
+```python
+import requests
+from requests_credssp import HttpCredSSPAuth
+
+credssp_auth = HttpCredSSPAuth('domain\\user', 'password', auth_mechanism='kerberos')
+r = requests.get("https://server:5986/wsman", auth=credssp_auth)
+...
+```
+
 #### With NTLM Auth
 
-Currently this is the only way to use CredSSP, there are plans in the future to
-add Kerberos auth support as well.
+This will force NTLM authentication and not attempt to use Kerberos.
 
 ```python
 import requests
@@ -83,7 +117,7 @@ patch be installed and registry keys modified to allow TLSv1.2 support.
 import requests
 from requests_credssp import HttpCredSSPAuth
 
-credssp_auth = HttpCredSSPAuth('domain\\user', 'password', auth_mechanism='ntlm', disable_tlsv1_2=True)
+credssp_auth = HttpCredSSPAuth('domain\\user', 'password', disable_tlsv1_2=True)
 r = requests.get("https://server:5986/wsman", auth=credssp_auth)
 ...
 ```
@@ -135,7 +169,5 @@ process.
 
 ## Backlog
 
-* Add support for Kerberos authentication
-* Once above is added, auto detect which version to use, preference Kerberos over NTLM
 * Replace dependency of pyOpenSSL if possible with inbuilt functions in Python
 * Add support for different credential types like smart card and redirected credentials

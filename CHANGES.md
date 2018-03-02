@@ -1,5 +1,11 @@
 # Changes
 
+## 0.2.0 (TBD)
+
+* Added support for Kerberos authentication over CredSSP
+* Tidied up test suite to use py.test and added pep8 checks
+* Drop support for Python 3.3
+
 ## 0.1.0 (Jul 7, 2017)
 
 * Added support for using the TLS context to encrypt payload data

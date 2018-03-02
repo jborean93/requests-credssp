@@ -1,71 +1,100 @@
 import base64
+import binascii
 import logging
 import re
 import struct
 
+from ntlm_auth.ntlm import Ntlm
+from requests.auth import AuthBase
+
+from requests_credssp.asn_structures import TSCredentials, TSRequest, \
+    TSPasswordCreds, NegoData
+from requests_credssp.exceptions import AuthenticationException, \
+    InvalidConfigurationException
+
+HAS_KERBEROS = True
+try:  # pragma: no cover
+    import gssapi
+    from gssapi.raw import acquire_cred_with_password  # needed for gssapi auth
+except ImportError as exc:
+    KERBEROS_IMPORT_ERROR = str(exc)
+    HAS_KERBEROS = False
+    pass
+
+try:
+    from urlparse import urlparse
+except ImportError:
+    from urllib.parse import urlparse
+
 try:
     from OpenSSL import SSL, _util
-except ImportError:
+except ImportError:  # pragma: no cover
     try:
         from OpenSSL import SSL
         from OpenSSL import crypto as _util
     except ImportError:
         raise Exception("Cannot import pyOpenSSL")
-from ntlm_auth.ntlm import Ntlm
-from requests.auth import AuthBase
-
-HAS_KERBEROS = False
-try:
-    import gssapi
-    HAS_KERBEROS = True
-except ImportError:
-    pass
-
-from requests_credssp.asn_structures import TSCredentials, TSRequest, TSPasswordCreds, NegoData
-from requests_credssp.exceptions import AuthenticationException, InvalidConfigurationException
 
 log = logging.getLogger(__name__)
+
 
 class HttpCredSSPAuth(AuthBase):
 
     BIO_BUFFER_SIZE = 8192
 
-    def __init__(self, username, password, auth_mechanism='ntlm', disable_tlsv1_2=False):
+    def __init__(self, username, password, auth_mechanism='auto',
+                 disable_tlsv1_2=False):
         """
         Initialises the CredSSP auth handler for dealing with requests.
 
-        :param username: The username including domain to auth with (DOMAIN\\USER or USER@DOMAIN.LOCAL)
-        :param password: The password for the user above to delegate to the server
-        :param auth_mechanism: The authentication mechanism (ntlm, kerberos) - Only NTLM is implemented so far
-        :param disable_tlsv1_2: Disable TLSv1.2 authentication and revert back to TLSv1.
+        :param username: The username including domain to auth with
+            (DOMAIN\\USER or USER@DOMAIN.LOCAL)
+        :param password: The password for the user above to delegate to the
+            server
+        :param auth_mechanism: The authentication mechanism
+            auto, ntlm, kerberos
+        :param disable_tlsv1_2: Disable TLSv1.2 authentication and revert back
+            to TLSv1.
         """
         self.username = username
-        self.domain, self.user = self._parse_username(username)
-        log.debug("The credentials that will be used in the auth, DOMAIN: '%s', USER: '%s'" % (self.domain, self.user))
         self.password = password
 
-        if auth_mechanism == 'ntlm':
-            self.context = Ntlm()
+        if auth_mechanism == 'auto' and HAS_KERBEROS:
+            self.contexts = [GSSApiContext, NTLMContext]
+        elif auth_mechanism == 'auto' or auth_mechanism == 'ntlm':
+            self.contexts = [NTLMContext]
+        elif auth_mechanism == 'kerberos' and HAS_KERBEROS:
+            self.contexts = [GSSApiContext]
         elif auth_mechanism == 'kerberos':
-            raise InvalidConfigurationException('Kerberos auth not yet implemented, please use NTLM instead')
+            raise InvalidConfigurationException("Auth mechnism kerberos is "
+                                                "chosen but python-gssapi is "
+                                                "not installed: %s"
+                                                % KERBEROS_IMPORT_ERROR)
         else:
-            raise InvalidConfigurationException('Unknown auth mechanism %s, please specify ntlm' % auth_mechanism)
+            raise InvalidConfigurationException("Unknown auth mechanism %s, "
+                                                "valid options are auto, "
+                                                "ntlm, or kerberos"
+                                                % auth_mechanism)
 
-        if disable_tlsv1_2 == True:
+        if disable_tlsv1_2:
             """
-            Windows 7 and Server 2008 R2 uses TLSv1 by default which is considered insecure. Microsoft have released
-            a KB that adds support for TLSv1.2 https://support.microsoft.com/en-us/kb/3080079 which can be installed.
-            Once installed the relevant entry keys need to be configured as show by this page
-            https://technet.microsoft.com/en-us/library/dn786418.aspx#BKMK_SchannelTR_TLS12.
+            Windows 7 and Server 2008 R2 uses TLSv1 by default which is
+            considered insecure. Microsoft have released a KB that adds support
+            for TLSv1.2 https://support.microsoft.com/en-us/kb/3080079 which
+            can be installed. Once installed the relevant reg keys need to be
+            configured as show by this page
+            https://technet.microsoft.com/en-us/library/dn786418.aspx
 
-            If you do not wish to do this you can set the disable_tlsv1_2 flag to true when calling CredSSP (NOT
-            RECOMMENDED).
+            If you do not wish to do this you can set the disable_tlsv1_2 flag
+            to true when calling CredSSP (NOT RECOMMENDED).
             """
-            log.debug("disable_tlsv1_2 is set to False, disabling TLSv1.2 support and reverting back to TLSv1")
+            log.debug("disable_tlsv1_2 is set to False, disabling TLSv1.2"
+                      "support and reverting back to TLSv1")
             self.tls_context = SSL.Context(SSL.TLSv1_METHOD)
 
-            # Revert OpenSSL fix to CBC ciphers due to incompatibility with MS TLS 1.0 implementation
-            # SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS 0x00000800 - SSL_OP_TLS_BLOCK_PADDING_BUG 0x00000200
+            # Revert OpenSSL fix to CBC ciphers due to incompatibility with
+            # MS TLS 1.0 implementation SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS
+            # 0x00000800 - SSL_OP_TLS_BLOCK_PADDING_BUG 0x00000200
             self.tls_context.set_options(0x00000800 | 0x00000200)
         else:
             self.tls_context = SSL.Context(SSL.TLSv1_2_METHOD)
@@ -95,37 +124,57 @@ class HttpCredSSPAuth(AuthBase):
         [MS-CSSP] v13.0 2016-07-14
 
         3.1.5 Processing Events and Sequencing Rules
-        The CredSSP Protocol is carried out in the following sequence and is subject to the protocol rules that
-        are described in the following steps
+        The CredSSP Protocol is carried out in the following sequence and is
+        subject to the protocol rules that are described in the following steps
 
-        :param response: The original 401 response when sending the first request to the server
+        :param response: The original 401 response when sending the first
+            request to the server
         :param kwargs: The requests kwargs from the original response
-        :return: The final response from the server after successful authentication, status code 200
+        :return: The final response from the server after successful
+            authentication, status code 200
         """
-        # 1. Complete TLS Handshake
+        log.info("Start TLS Handshake process")
         self._start_tls_handshake(response, **kwargs)
 
-        from requests_credssp.spnego import SpnegoContext
-        sec_context = SpnegoContext(response, self.username, self.password)
-        sec_context.negotiate_auth_mech(self, **kwargs)
-
-        # 2. Creates the authentication token to send to the server in conjunction with Step 3
+        log.info("Start authentication process")
+        hostname = urlparse(response.url).hostname
         server_certificate = self.tls_connection.get_peer_certificate()
-        #authenticate_token = self._get_authentication_token(response, server_certificate, **kwargs)
-
-        #context, authenticate_token = self._get_authentication_token_kerb2(response, **kwargs)
-        context, authenticate_token = self._get_authentication_token_kerb(response, **kwargs)
-
-        # 3. Encrypt the public key and send in conjunction with the authentication token to the server
         server_public_key = self._get_rsa_public_key(server_certificate)
-        public_key_ts_request = self._send_auth_response(response, context, authenticate_token, server_public_key, **kwargs)
 
-        # 4. Verify server's public key response to thwart man in the middle attacks
-        self._verify_public_keys(context, server_public_key, public_key_ts_request)
+        auth_complete = False
+        errors = []
+        for context in self.contexts:
+            # try all possible contexts for CredSSP authentication
+            class_type = context.__name__
+            log.debug("Trying %s authentication" % class_type)
+            try:
+                context = context(hostname, self.username, self.password)
+                server_cert = self._authenticate(context, server_public_key,
+                                                 response, **kwargs)
+            except Exception as exc:
+                # failed to authenticate with this auth context, keep on trying
+                # the remaining ones
+                log.warning("%s authentication failed: %s"
+                            % (class_type, str(exc)))
+                errors.append("%s: %s" % (class_type, exc))
+            else:
+                log.info("%s authentication successful" % class_type)
+                auth_complete = True
+                break
 
-        # 5. Send encrypted credentials to the server
-        final_response = self._send_encrypted_credentials(context, response, **kwargs)
+        if not auth_complete:
+            raise AuthenticationException("Failed to authenticate with "
+                                          "server: %s" % str(errors))
+
+        log.info("Verify the server's public certificate to mitigate"
+                 "MitM attacks")
+        self._verify_public_keys(context, server_public_key, server_cert)
+
+        log.info("Sending encrypted credentials to the server")
+        final_response = self._send_encrypted_credentials(context, response,
+                                                          **kwargs)
         final_response.history.append(response)
+        log.info("Authentication complete")
 
         return final_response
 
@@ -134,9 +183,10 @@ class HttpCredSSPAuth(AuthBase):
         [MS-CSSP] v13.0 2016-07-14
 
         3.1.5 Processing Events and Sequencing Rules - Step 1
-        This is the first step in a CredSSP auth sequence where the client and server complete the TLS handshake as
-        specified in RFC2246. After the handshake is complete, all subsequent CredSSP Protocol messages are encrypted
-        by the TLS channel.
+        This is the first step in a CredSSP auth sequence where the client and
+        server complete the TLS handshake as specified in RFC2246. After the
+        handshake is complete, all subsequent CredSSP Protocol messages are
+        encrypted by the TLS channel.
 
         :param response: The original 401 response from the server
         :param kwargs: The requests kwargs from the original response
@@ -153,7 +203,8 @@ class HttpCredSSPAuth(AuthBase):
                 self.tls_connection.do_handshake()
             except SSL.WantReadError:
                 request = response.request.copy()
-                credssp_token = self.tls_connection.bio_read(self.BIO_BUFFER_SIZE)
+                credssp_token = \
+                    self.tls_connection.bio_read(self.BIO_BUFFER_SIZE)
                 self._set_credssp_token(request, credssp_token)
 
                 response = response.connection.send(request, **kwargs)
@@ -166,18 +217,35 @@ class HttpCredSSPAuth(AuthBase):
                 break
 
         self.cipher_negotiated = self.tls_connection.get_cipher_name()
-        log.debug("_start_tls_handshake(): Handshake complete. Protocol: %s, Cipher: %s" % (
-                self.tls_connection.get_protocol_version_name(), self.tls_connection.get_cipher_name()))
+        log.debug("_start_tls_handshake(): Handshake complete. Protocol: %s, "
+                  "Cipher: %s"
+                  % (self.tls_connection.get_protocol_version_name(),
+                     self.tls_connection.get_cipher_name()))
 
-    def _get_authentication_token_kerb(self, response, **kwargs):
-        name = gssapi.Name('vagrant-domain@DOMAIN.LOCAL', name_type=gssapi.NameType.kerberos_principal)
-        server_name = gssapi.Name('HTTP/DC01.domain.local@DOMAIN.LOCAL', name_type=gssapi.NameType.kerberos_principal)
-        cred = gssapi.Credentials(usage='initiate', name=name)
+    def _authenticate(self, context, server_public_cert, response, **kwargs):
+        """
+        [MS-CSSP] v13.0 2016-07-14
 
-        context = gssapi.SecurityContext(name=server_name, creds=cred, usage='initiate')
+        3.1.5 Processing Events and Sequencing Rules - Step 2 and 3
+        Over the encrypted TLS channel, the Kerberos or NTLM token is sent from
+        the client to the server and complete the initial authentication
+        context.
 
-        out_token = context.step()
-        while not context.complete:
+        Once a context is established, the client encrypts the public cert of
+        the server using the auth context. This key is then sent to the server
+        as part of the TSRequest.
+
+        :param context: The authentication context class to use in
+            authentication
+        :param server_public_cert: The ASN.1 encoded SubjectPublicKey field of
+            the server's X509 certificate
+        :param response: The response from the server after completing the TLS
+            handshake
+        :param kwargs: The requests kwargs from the original response
+        :return: The TSRequest structure received from the server containing
+            the pubKeyAuth for the client to verify
+        """
+        for out_token in context.step():
             nego_data = NegoData()
             nego_data['nego_token'].value = out_token
             ts_request = TSRequest()
@@ -187,6 +255,7 @@ class HttpCredSSPAuth(AuthBase):
             auth_request = response.request.copy()
             self._set_credssp_token(auth_request, credssp_token)
 
+            log.info("_authenticate(): Sending authentication request")
             response = response.connection.send(auth_request, **kwargs)
             response.content
             response.raw.release_conn()
@@ -199,109 +268,28 @@ class HttpCredSSPAuth(AuthBase):
 
             nego_data = NegoData()
             nego_data.parse_data(ts_request['nego_tokens'].value)
-            in_token = nego_data['nego_token'].value
-            out_token = context.step(token=in_token)
+            context.in_token = nego_data['nego_token'].value
 
-        return context, out_token
-
-    def _get_authentication_token(self, response, server_certificate, **kwargs):
-        """
-        [MS-CSSP] v13.0 2016-07-14
-
-        3.1.5 Processing Events and Sequencing Rules - Step 2
-        Over the encrypted TLS channel, the SPNEGO, Kerberos, or NTLM handshake between the client and server completes
-        authentication and establishes an encryption key. While this step has us sending the final token to the
-        server, this is done in conjunction with the public key done in Step 3
-
-        :param response: The response from the server after completing the TLS handshake
-        :param server_certificate: The certificate of the server endpoint to be used for Channel Binding Tokens
-        :param kwargs: The requests kwargs from the original response
-        :return: The final authentication token to be sent to the server
-        """
-
-        # TODO: Add support for Kerberos authentication and not just NTLM
-
-        log.debug("_get_authentication_token(): creating NTLM negotiate token and add it to the initial TSRequest")
-        negotiate_token = self.context.create_negotiate_message(self.domain).decode('ascii')
-        log.debug("_get_authentication_token(): NTLM Negotiate Token: %s" % negotiate_token)
-        negotiate_token = base64.b64decode(negotiate_token)
-
-        negotiate_nego_data = NegoData()
-        negotiate_nego_data['nego_token'].value = negotiate_token
-        negotiate_ts_request = TSRequest()
-        negotiate_ts_request['nego_tokens'].value = negotiate_nego_data.get_data()
-
-        negotiate_credssp_token = self.wrap(negotiate_ts_request.get_data())
-        negotiate_request = response.request.copy()
-        self._set_credssp_token(negotiate_request, negotiate_credssp_token)
-
-        log.debug("_get_authentication_token(): get NTLM challenge token from the "
-                  "server and add it to the ntlm context")
-        challenge_response = response.connection.send(negotiate_request, **kwargs)
-        challenge_response.content
-        challenge_response.raw.release_conn()
-        challenge_credssp_token = self._get_credssp_token(challenge_response)
-        challenge_ts_request_data = self.unwrap(challenge_credssp_token)
-
-        challenge_ts_request = TSRequest()
-        challenge_ts_request.parse_data(challenge_ts_request_data)
-        challenge_ts_request.check_error_code()
-
-        challenge_nego_data = NegoData()
-        challenge_nego_data.parse_data(challenge_ts_request['nego_tokens'].value)
-        challenge_token = challenge_nego_data['nego_token'].value
-        encoded_challenge_token = base64.b64encode(challenge_token)
-        log.debug("_get_authentication_token(): NTLM Challenge Token: %s" % encoded_challenge_token)
-        self.context.parse_challenge_message(encoded_challenge_token)
-
-        log.debug("_get_authentication_token(): create NTLM authentication token")
-        server_cert_hash = server_certificate.digest('SHA256').decode().replace(':', '')
-        authenticate_token = self.context.create_authenticate_message(self.user, self.password, self.domain,
-                                                                      server_certificate_hash=server_cert_hash)
-        authenticate_token = base64.b64decode(authenticate_token)
-
-        return authenticate_token
-
-    def _send_auth_response(self, response, context, authenticate_token, server_public_key, **kwargs):
-        """
-        [MS-CSSP] v13.0 2016-07-14
-
-        3.1.5 Processing Events and Sequencing Rules - Step 3
-        The client encrypts the public key it received from the server by using the confidentiality support of the
-        authentication protocol (Kerberos/NTLM). This key is added to the pubKeyAuth field of the TSRequest along with
-        the authenticate_token in the negoTokens field.
-
-        :param response: The response from the server after completing the TLS handshake
-        :param authenticate_token: The final authentication token to be sent to the server
-        :param server_public_key: The ASN.1 encoded SubjectPublicKey field of the server X509 certificate
-        :param kwargs: The requests kwargs from the original response
-        :return: The TSRequest structure send from the server containing the pubKeyAuth for client to verify
-        """
-        #if self.context.session_security is None:
-        #    raise Exception("No session security was negotiated during the auth process. Cannot encrypt certificate")
-
-        log.debug("_send_auth_response(): Generate the encrypted public key data and add it to the TSRequest")
-
-        # python-gssapi wrap
-        enc = gssapi.raw.wrap(context, server_public_key, True, 0)
-        encrypted_public_key = enc.message
+        # now send the final auth token with the server's public cert
+        encrypted_public_key = context.wrap(server_public_cert)
 
         ts_request = TSRequest()
         ts_request['pub_key_auth'].value = encrypted_public_key
 
-        if authenticate_token is not None:
+        if context.final_token is not None:
             auth_nego_data = NegoData()
-            auth_nego_data['nego_token'].value = authenticate_token
+            auth_nego_data['nego_token'].value = context.final_token
             ts_request['nego_tokens'].value = auth_nego_data.get_data()
 
-        log.debug("_send_auth_response(): Send TSRequest structure containing "
-                  "the final auth token and public key info")
+        log.debug("_authenticate(): Send TSRequest structure containing the "
+                  "final auth token and public key info")
         auth_credssp_token = self.wrap(ts_request.get_data())
 
         request = response.request.copy()
         self._set_credssp_token(request, auth_credssp_token)
 
-        log.debug("_send_auth_response(): Get the public key structure response from the server")
+        log.debug("_authenticate(): Get the public key structure response from"
+                  " the server")
         response = response.connection.send(request, **kwargs)
         response.content
         response.raw.release_conn()
@@ -313,88 +301,91 @@ class HttpCredSSPAuth(AuthBase):
         public_key_ts_request.check_error_code()
 
         if public_key_ts_request['pub_key_auth'].value is None:
-            raise AuthenticationException('The server did not respond with pubKeyAuth info auth was rejected')
+            raise AuthenticationException('The server did not respond with '
+                                          'pubKeyAuth info auth was rejected')
 
         return public_key_ts_request
 
-    def _verify_public_keys(self, context, expected_key, public_key_ts_request):
+    def _verify_public_keys(self, context, expected_key,
+                            public_key_ts_request):
         """
         [MS-CSSP] v13.0 2016-07-14
 
         3.1.5 Processing Events and Sequencing Rules - Step 4
-        After the server received the public key in Step 3 it verifies the key with what was in the handshake.
-        After the verification it then add 1 to the first byte representing the public key and encrypts the binary
+        After the server received the public key in Step 3 it verifies the key
+        with what was in the handshake. After the verification it then add 1 to
+        the first byte representing the public key and encrypts the binary
         result by using the authentication protocol's encryption services.
 
-        This method does the opposite where it will decrypt the public key returned from the server and subtract
-        the first byte by 1 to compare with the public key we sent originally.
+        This method does the opposite where it will decrypt the public key
+        returned from the server and subtract the first byte by 1 to compare
+        with the public key we sent originally.
 
-        :param expected_key: The ASN.1 encoded SubjectPublicKey field of the server X509 certificate
-        :param public_key_ts_request: The TSRequest structure received from the server for host verification
+        :param expected_key: The ASN.1 encoded SubjectPublicKey field of the
+            server X509 certificate
+        :param public_key_ts_request: The TSRequest structure received from the
+            server for host verification
         """
-        log.debug("_verify_public_keys(): Get raw public key from the server and decrypt it for verification")
+        log.debug("_verify_public_keys(): Get raw public key from the server "
+                  "and decrypt it for verification")
         raw_public_key = public_key_ts_request['pub_key_auth'].value
 
-        # For NTLM signatures are always 16 bytes long, is it the same for Kerberos?
-        #public_key_signature = raw_public_key[:16]
-        #encrypted_public_key = raw_public_key[16:]
-        #public_key = self.context.session_security.unwrap(encrypted_public_key, public_key_signature)
-
-        # KERBEROS
         public_key = context.unwrap(raw_public_key)
-        public_key = public_key.message
 
         # Get the first byte from the server public key and subtract it by 1
-        first_byte = public_key[0]
+        first_byte = struct.unpack("<B", public_key[0:1])[0]
 
-        # In Python 2 first_byte is a string so it needs to be unpacked. Python 3 it is a byte no unpacking is needed
-        if isinstance(first_byte, str):
-            first_byte = struct.unpack('B', first_byte)[0]
-
-        new_byte = struct.pack('B', first_byte - 1)
+        new_byte = struct.pack('<B', first_byte - 1)
         actual_key = new_byte + public_key[1:]
 
-        assert actual_key == expected_key, "Could not verify key sent from the server, " \
-                                           "possibly man in the middle attack"
-        log.debug("_verify_public_keys(): verification of the server's public key is successful")
+        if actual_key != expected_key:
+            raise AuthenticationException("Could not verify key sent from the "
+                                          "server, potential man in the middle"
+                                          " attack")
+        log.debug("_verify_public_keys(): verification of the server's public "
+                  "key is successful")
 
     def _send_encrypted_credentials(self, context, response, **kwargs):
         """
         [MS-CSSP] v13.0 2016-07-14
 
         3.1.5 Processing Events and Sequencing Rules - Step 5
-        After the client has verified the server's authenticity, it encrypts the user's credentials with the
-        authentication protocol's encryption services. The resulting value is encapsulated in the authInfo field of the
-        TSRequest structure and sent over the encrypted TLS channel to the server
+        After the client has verified the server's authenticity, it encrypts
+        the user's credentials with the authentication protocol's encryption
+        services. The resulting value is encapsulated in the authInfo field of
+        the TSRequest structure and sent over the encrypted TLS channel to the
+        server
 
-        :param response: The response from the server after completing the TLS handshake
+        :param response: The response from the server after completing the TLS
+            handshake
         :param kwargs: The requests kwargs from the original response
-        :return: The final response from the server after successful authentication, status code 200
+        :return: The final response from the server after successful
+            authentication, status code 200
         """
         ts_password_credentials = TSPasswordCreds()
-        ts_password_credentials['domain_name'].value = self.domain.encode('utf-16le')
-        ts_password_credentials['user_name'].value = self.user.encode('utf-16le')
-        ts_password_credentials['password'].value = self.password.encode('utf-16le')
+        ts_password_credentials['domain_name'].value = \
+            context.domain.encode('utf-16-le')
+        ts_password_credentials['user_name'].value = \
+            context.username.encode('utf-16-le')
+        ts_password_credentials['password'].value = \
+            context.password.encode('utf-16-le')
 
         ts_credentials = TSCredentials()
         # TODO: Add support for different credential types
         ts_credentials['cred_type'].value = struct.pack('B', 1)
-        ts_credentials['credentials'].value = ts_password_credentials.get_data()
+        ts_credentials['credentials'].value = \
+            ts_password_credentials.get_data()
 
         credential_ts_request = TSRequest()
-        # NTLM
-        #encrypted_credential, encrypted_credential_sig = self.context.session_security.wrap(ts_credentials.get_data())
-        #credential_ts_request['auth_info'].value = encrypted_credential_sig + encrypted_credential
-
-        # KERBEROS
-        encrypted_credential = context.wrap(ts_credentials.get_data(), True)
-        credential_ts_request['auth_info'].value = encrypted_credential.message
+        encrypted_credential = context.wrap(ts_credentials.get_data())
+        credential_ts_request['auth_info'].value = encrypted_credential
 
         credential_credssp_token = self.wrap(credential_ts_request.get_data())
         request = response.request.copy()
         self._set_credssp_token(request, credential_credssp_token)
 
-        log.info("_send_encrypted_credentials(): Sending the encrypted credentials to the server")
+        log.info("_send_encrypted_credentials(): Sending the encrypted "
+                 "credentials to the server")
         response = response.connection.send(request, **kwargs)
 
         return response
@@ -414,7 +405,8 @@ class HttpCredSSPAuth(AuthBase):
 
         while True:
             try:
-                encrypted_chunk = self.tls_connection.bio_read(self.BIO_BUFFER_SIZE)
+                encrypted_chunk = \
+                    self.tls_connection.bio_read(self.BIO_BUFFER_SIZE)
             except SSL.WantReadError:
                 break
             encrypted_data += encrypted_chunk
@@ -454,25 +446,12 @@ class HttpCredSSPAuth(AuthBase):
         return data
 
     @staticmethod
-    def _parse_username(username):
-        user = ''
-        domain = '.'
-
-        try:
-            domain, user = username.split('\\', 1)
-        except ValueError:
-            try:
-                user, domain = username.split('@', 1)
-            except ValueError:
-                user = username
-
-        return domain, user
-
-    @staticmethod
     def _check_credssp_supported(response):
         authenticate_header = response.headers.get('www-authenticate', '')
         if 'CREDSSP' not in authenticate_header.upper():
-            raise AuthenticationException('The server did not respond with CredSSP as an available auth method')
+            raise AuthenticationException('The server did not respond with a '
+                                          'CredSSP as an available auth '
+                                          'method')
 
     @staticmethod
     def _get_credssp_token(response):
@@ -485,7 +464,8 @@ class HttpCredSSPAuth(AuthBase):
             decoded_token = base64.b64decode(encoded_token)
             return decoded_token
         else:
-            raise AuthenticationException("The server did not response with a CredSSP token, auth rejected")
+            raise AuthenticationException("The server did not response with a "
+                                          "CredSSP token, auth rejected")
 
     @staticmethod
     def _set_credssp_token(request, token):
@@ -496,15 +476,21 @@ class HttpCredSSPAuth(AuthBase):
     @staticmethod
     def _get_rsa_public_key(cert):
         """
-        Written by Ian Clegg https://github.com/ianclegg/winrmlib/blob/master/winrmlib/api/authentication.py
+        Written by Ian Clegg
+        github.com/ianclegg/winrmlib/blob/master/winrmlib/api/authentication.py
 
-        PyOpenSSL does not provide a public method to export the public key from a certificate as a properly formatted
-        ASN.1 RSAPublicKey structure. There are 'hacks' which use dump_privatekey(crypto.FILETYPE_ASN1, <public_key>),
-        but this dumps the public key within a PrivateKeyInfo structure which is not suitable for a comparison. This
-        approach uses the PyOpenSSL CFFI bindings to invoke the i2d_RSAPublicKey() which correctly extracts the key
-        material in an ASN.1 RSAPublicKey structure.
+        PyOpenSSL does not provide a public method to export the public key
+        from a certificate as a properly formatted ASN.1 RSAPublicKey
+        structure. There are 'hacks' which use
+        dump_privatekey(crypto.FILETYPE_ASN1, <public_key>), but this dumps the
+        public key within a PrivateKeyInfo structure which is not suitable for
+        a comparison. This approach uses the PyOpenSSL CFFI bindings to invoke
+        the i2d_RSAPublicKey() which correctly extracts the key material in an
+        ASN.1 RSAPublicKey structure.
+
         :param cert: The ASN.1 Encoded Certificate
-        :return: The ASN.1 Encoded RSAPublicKey structure containing the supplied certificates public Key
+        :return: The ASN.1 Encoded RSAPublicKey structure containing the
+            supplied certificates public Key
         """
         openssl_pkey = cert.get_pubkey()
         openssl_lib = _util.binding.lib
@@ -516,3 +502,95 @@ class HttpCredSSPAuth(AuthBase):
         ffi.gc(buf[0], openssl_lib.OPENSSL_free)
 
         return public_key
+
+
+class NTLMContext(object):
+
+    def __init__(self, hostname, username, password):
+        # try and get the domain part from the username
+        log.info("Setting up NTLM Security Context for user %s" % username)
+        try:
+            self.domain, self.username = username.split("\\", 1)
+        except ValueError:
+            self.username = username
+            self.domain = ''
+        self.password = password
+        self.in_token = None
+        self.final_token = None
+
+        self._context = Ntlm()
+
+    def step(self):
+        msg1 = self._context.create_negotiate_message(self.domain)
+        msg1 = base64.b64decode(msg1)
+
+        log.debug("NTLM Negotiate message: %s" % binascii.hexlify(msg1))
+        yield msg1
+
+        log.info("NTLM: Parsing Challenge message: %s" % self.in_token)
+        msg2 = base64.b64encode(self.in_token)
+        self._context.parse_challenge_message(msg2)
+
+        log.info("NTLM: Generating Authenticate message")
+        msg3 = self._context.create_authenticate_message(
+            user_name=self.username,
+            password=self.password,
+            domain_name=self.domain
+        )
+        self.final_token = base64.b64decode(msg3)
+
+    def wrap(self, data):
+        enc_data, enc_signature = self._context.session_security.wrap(data)
+        return enc_signature + enc_data
+
+    def unwrap(self, data):
+        return self._context.session_security.unwrap(data[16:], data[:16])
+
+
+class GSSApiContext(object):
+
+    def __init__(self, hostname, username, password):
+        log.info("Setting up GSSAPI Security Context for user %s" % username)
+        self.domain = ''
+        self.username = username
+        self.password = password
+        self.in_token = None
+        self.final_token = None
+
+        server_name = gssapi.Name('http@%s' % hostname,
+                                  name_type=gssapi.NameType.hostbased_service)
+        cred = self._get_kerberos_credential(self.username, self.password)
+        self._context = gssapi.SecurityContext(name=server_name, creds=cred,
+                                               usage='initiate')
+
+    def step(self):
+        while not self._context.complete:
+            log.info("GSSAPI: gss_init_sec_context called")
+            out_token = self._context.step(self.in_token)
+            if out_token:
+                yield out_token
+            else:
+                log.info("GSSAPI: gss_init_sec_context complete")
+
+    def wrap(self, data):
+        return self._context.wrap(data, True)[0]
+
+    def unwrap(self, data):
+        return self._context.unwrap(data)[0]
+
+    def _get_kerberos_credential(self, username, password):
+        log.debug("GSSAPI: Acquiring credentials handle for user %s with "
+                  "password" % username)
+
+        user = gssapi.Name(base=username,
+                           name_type=gssapi.NameType.user)
+        bpass = password.encode('utf-8')
+        try:
+            creds = acquire_cred_with_password(user, bpass, usage='initiate')
+        except gssapi.exceptions.GSSError as er:
+            raise AuthenticationException("Failed to acquire GSSAPI "
+                                          "credential with password: %s"
+                                          % str(er))
+
+        log.info("GSSAPI: Acquired credentials for user %s" % str(user))
+        return creds.creds
