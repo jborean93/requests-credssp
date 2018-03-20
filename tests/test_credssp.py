@@ -870,8 +870,7 @@ class TestHttpCredSSPAuthFunctional(object):
         with pytest.raises(AuthenticationException) as exc:
             self._send_request(test_url, runner[1], runner[2],
                                minimum_version=100)
-        assert str(exc.value) == "The reported server version was 6 and did " \
-                                 "not meet the minimum requirements of 100"
+        assert "did not meet the minimum requirements of 10" in str(exc.value)
 
     def _send_request(self, url, username, password, minimum_version=2):
         """
