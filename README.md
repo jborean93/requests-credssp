@@ -44,6 +44,7 @@ To install from source, download the source code, then run:
 
 - ntlm-auth
 - pyasn1
+- six
 - pyOpenSSL>=16.0.0
 - requests>=2.0.0
 - gssapi (Kerberos auth with non Windows hosts)

@@ -8,11 +8,9 @@ import pytest
 
 from xml.etree import ElementTree as ET
 
-from requests_credssp.asn_structures import SPNEGOMechs
-from requests_credssp.credssp import CredSSPContext, GSSApiContext, \
-    HttpCredSSPAuth, NTLMContext, SPNEGO
+from requests_credssp.credssp import CredSSPContext, HttpCredSSPAuth
 from requests_credssp.exceptions import AuthenticationException, \
-    InvalidConfigurationException, NTStatusException
+    NTStatusException
 
 
 class TestCredSSPContext(object):
@@ -872,7 +870,16 @@ class TestHttpCredSSPAuthFunctional(object):
                                minimum_version=100)
         assert "did not meet the minimum requirements of 10" in str(exc.value)
 
-    def _send_request(self, url, username, password, minimum_version=2):
+    def test_credssp_with_ntlm_explicit(self, runner):
+        test_url = "https://%s:5986/wsman" % runner[0]
+        actual = self._send_request(test_url, runner[1], runner[2],
+                                    auth_mech="ntlm")
+
+        # try and parse the xml response, will fail if the decryption failed
+        ET.fromstring(actual)
+
+    def _send_request(self, url, username, password, auth_mech="auto",
+                      minimum_version=2):
         """
         Sends a request to the url with the credentials specified. Will also
         try send an encrypted config request and return the decrypted response
@@ -883,7 +890,7 @@ class TestHttpCredSSPAuthFunctional(object):
         session = requests.Session()
         session.verify = False
         session.auth = HttpCredSSPAuth(username, password,
-                                       auth_mechanism='ntlm',
+                                       auth_mechanism=auth_mech,
                                        minimum_version=minimum_version)
         request = requests.Request('POST', url, data='')
         request.headers['Content-Type'] = 'application/soap+xml;charset=UTF-8'
@@ -955,19 +962,19 @@ class TestHttpCredSSPAuthFunctional(object):
         return decrypted_response
 
     def _get_trailer_length(self, message_length, cipher_suite):
-        # I really don't like the way this works but can't find a better way, MS
-        # allows you to get this info through the struct SecPkgContext_StreamSizes
-        # but there is no GSSAPI/OpenSSL equivalent so we need to calculate it
-        # ourselves
+        # I really don't like the way this works but can't find a better way,
+        # MS allows you to get this info through the struct
+        # SecPkgContext_StreamSizes but there is no GSSAPI/OpenSSL equivalent
+        # so we need to calculate it ourselves
 
         if re.match('^.*-GCM-[\w\d]*$', cipher_suite):
-            # We are using GCM for the cipher suite, GCM has a fixed length of 16
-            # bytes for the TLS trailer making it easy for us
+            # We are using GCM for the cipher suite, GCM has a fixed length of
+            # 16 bytes for the TLS trailer making it easy for us
             trailer_length = 16
         else:
             # We are not using GCM so need to calculate the trailer size. The
-            # trailer length is equal to the length of the hmac + the length of the
-            # padding required by the block cipher
+            # trailer length is equal to the length of the hmac + the length of
+            # the padding required by the block cipher
             hash_algorithm = cipher_suite.split('-')[-1]
 
             # while there are other algorithms, SChannel doesn't support them
@@ -998,115 +1005,3 @@ class TestHttpCredSSPAuthFunctional(object):
             trailer_length = (pre_pad_length + padding_length) - message_length
 
         return trailer_length
-
-
-class TestSPNEGO(object):
-
-    def test_spnego_auth_mechanism_auto(self):
-        spnego = SPNEGO("", "", "", "auto")
-        # while Kerberos should be in the mechs, we only add that in if the
-        # init context was successful in the first step
-        assert spnego.mechs == [SPNEGOMechs.NTLMSSP]
-        assert spnego.try_kerberos
-
-    def test_spnego_auth_mechanism_ntlm(self):
-        spnego = SPNEGO("", "", "", "ntlm")
-        assert spnego.mechs == [SPNEGOMechs.NTLMSSP]
-        assert not spnego.try_kerberos
-
-    def test_spnego_invalid_auth_mechanism(self):
-        with pytest.raises(InvalidConfigurationException) as exc:
-            SPNEGO("", "", "", "fake")
-        assert str(exc.value) == "Invalid auth mechanism value fake, must " \
-                                 "be auto, ntlm or kerberos"
-
-
-class TestNTLMContext(object):
-
-    def test_auth_step(self):
-        ntlm = NTLMContext("hostname", "username", "password")
-        assert ntlm.hostname == "hostname"
-        assert ntlm.domain == ""
-        assert ntlm.username == "username"
-        assert ntlm.password == "password"
-
-        challenge_token = b'\x4E\x54\x4C\x4D\x53\x53\x50\x00' \
-                          b'\x02\x00\x00\x00\x04\x00\x04\x00' \
-                          b'\x38\x00\x00\x00\x36\x82\x89\xE2' \
-                          b'\x45\x80\xF2\xD5\xB4\xF3\xED\x50' \
-                          b'\x00\x00\x00\x00\x00\x00\x00\x00' \
-                          b'\xB2\x00\xB2\x00\x3C\x00\x00\x00' \
-                          b'\x06\x01\xB1\x1D\x00\x00\x00\x0F' \
-                          b'\x43\x4F\x52\x50\x02\x00\x08\x00' \
-                          b'\x43\x00\x4F\x00\x52\x00\x50\x00' \
-                          b'\x01\x00\x1A\x00\x43\x00\x4F\x00' \
-                          b'\x4D\x00\x50\x00\x55\x00\x54\x00' \
-                          b'\x45\x00\x52\x00\x48\x00\x4F\x00' \
-                          b'\x53\x00\x54\x00\x31\x00\x04\x00' \
-                          b'\x1E\x00\x63\x00\x6F\x00\x72\x00' \
-                          b'\x70\x00\x2E\x00\x6F\x00\x72\x00' \
-                          b'\x67\x00\x2E\x00\x63\x00\x6F\x00' \
-                          b'\x6D\x00\x2E\x00\x61\x00\x75\x00' \
-                          b'\x03\x00\x3A\x00\x43\x00\x4F\x00' \
-                          b'\x4D\x00\x50\x00\x55\x00\x54\x00' \
-                          b'\x45\x00\x52\x00\x48\x00\x4F\x00' \
-                          b'\x53\x00\x54\x00\x31\x00\x2E\x00' \
-                          b'\x63\x00\x6F\x00\x72\x00\x70\x00' \
-                          b'\x2E\x00\x6F\x00\x72\x00\x67\x00' \
-                          b'\x2E\x00\x63\x00\x6F\x00\x6D\x00' \
-                          b'\x2E\x00\x61\x00\x75\x00\x05\x00' \
-                          b'\x14\x00\x6F\x00\x72\x00\x67\x00' \
-                          b'\x2E\x00\x63\x00\x6F\x00\x6D\x00' \
-                          b'\x2E\x00\x61\x00\x75\x00\x07\x00' \
-                          b'\x08\x00\xC5\xBE\x86\x1B\x94\x04' \
-                          b'\xD2\x01\x00\x00\x00\x00'
-        msg1 = ntlm.step()
-        assert not ntlm.complete
-        assert isinstance(msg1, bytes)
-        assert msg1[:9] == b"NTLMSSP\x00\x01"
-
-        msg3 = ntlm.step(challenge_token)
-        assert ntlm.complete
-        assert isinstance(msg3, bytes)
-        assert msg3[:9] == b"NTLMSSP\x00\x03"
-
-        # the sign message and encrypted message should have different seq
-        # numbers
-        data = b"\x01\x02\x03\x04"
-        sign_msg = ntlm.sign(data)
-        enc_msg = ntlm.wrap(data)
-        assert sign_msg != enc_msg
-        assert sign_msg != data
-        assert enc_msg != data
-        import binascii
-
-        # 0-4 is NTLM sig == 01 00 00 00 , 12:16 is the sequence number
-        assert sign_msg[:4] == b"\x01\x00\x00\x00"
-        assert sign_msg[12:16] == b"\x00\x00\x00\x00"
-        assert enc_msg[:4] == b"\x01\x00\x00\x00"
-        assert enc_msg[12:16] == b"\x01\x00\x00\x00"
-
-    def test_ntlm_username_upn(self):
-        ntlm = NTLMContext("", "username@DOMAIN.LOCAL", "password")
-        assert ntlm.domain == ""
-        assert ntlm.username == "username@DOMAIN.LOCAL"
-        assert ntlm.password == "password"
-
-    def test_ntlm_netlogon(self):
-        ntlm = NTLMContext("", "DOMAIN\\username", "password")
-        assert ntlm.domain == "DOMAIN"
-        assert ntlm.username == "username"
-        assert ntlm.password == "password"
-
-
-class TestGSSApiContext(object):
-
-    def test_gssapi_properties(self):
-        # not much we can do here apart from verifying it doesn't change the
-        # username
-        gssapi = GSSApiContext("hostname", "username@DOMAIN.LOCAL", "password")
-        assert gssapi.hostname == "hostname"
-        assert gssapi.domain == ""
-        assert gssapi.username == "username@DOMAIN.LOCAL"
-        assert gssapi.password == "password"
-        assert not gssapi.complete

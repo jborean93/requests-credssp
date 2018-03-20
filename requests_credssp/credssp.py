@@ -10,43 +10,25 @@ import re
 import struct
 import warnings
 
-from copy import deepcopy
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from ntlm_auth.ntlm import Ntlm
+from OpenSSL import SSL
 from pyasn1.codec.der import encoder, decoder
 from requests.auth import AuthBase
 
-from requests_credssp.asn_structures import InitialContextToken, \
-    MechTypeList, NegoToken, NegotiationToken, SPNEGOMechs, SPNEGONegState, \
-    TSCredentials, TSPasswordCreds, TSRequest
-from requests_credssp.exceptions import AuthenticationException, \
-    InvalidConfigurationException
+from requests_credssp.asn_structures import NegoToken, TSCredentials, \
+    TSPasswordCreds, TSRequest
+from requests_credssp.exceptions import AuthenticationException
+from requests_credssp.spnego import get_auth_context
 
 try:
     from urlparse import urlparse
 except ImportError:
     from urllib.parse import urlparse
 
-try:
-    from OpenSSL import SSL
-except ImportError as exc:  # pragma: no cover
-    raise Exception("Cannot import pyOpenSSL: %s" % str(exc))
-
-HAS_KERBEROS = True
-try:  # pragma: no cover
-    import gssapi
-    from gssapi.raw import acquire_cred_with_password  # needed for gssapi auth
-except ImportError as exc:
-    KERBEROS_IMPORT_ERROR = str(exc)
-    HAS_KERBEROS = False
-    pass
-
-
 log = logging.getLogger(__name__)
 
 
 class CredSSPContext(object):
-
     BIO_BUFFER_SIZE = 8192
 
     def __init__(self, hostname, username, password, auth_mechanism='auto',
@@ -118,10 +100,10 @@ class CredSSPContext(object):
 
         log.info("Starting Authentication process")
         version = 6
-        context = SPNEGO(self.hostname, self.username, self.password,
-                         self.auth_mechanism)
-        auth_step = context.step()
-        out_token = next(auth_step)
+        context, auth_step, out_token = get_auth_context(self.hostname,
+                                                         self.username,
+                                                         self.password,
+                                                         self.auth_mechanism)
         while not context.complete:
             nego_token = NegoToken()
             nego_token['negoToken'] = out_token
@@ -178,6 +160,7 @@ class CredSSPContext(object):
                                           "pubKeyAuth info, authentication "
                                           "was rejected")
         if len(ts_request['negoTokens']) > 0:
+            # SPNEGO auth returned the mechListMIC for us to verify
             auth_step.send(bytes(ts_request['negoTokens'][0]['negoToken']))
 
         response_key = context.unwrap(bytes(ts_request['pubKeyAuth']))
@@ -534,252 +517,3 @@ class HttpCredSSPAuth(AuthBase):
 
         token = token_match.group(1)
         return base64.b64decode(token)
-
-
-class SPNEGO(object):
-
-    def __init__(self, hostname, username, password, auth_mechanism):
-        self.hostname = hostname
-        self.context = None
-        self.complete = False
-
-        # the domain, username combo is parsed depending on the final
-        # authenticated context
-        self._username = username
-        self._password = password
-
-        # KRB5 is only added if we can init the context and get the first
-        # token in the step function
-        if auth_mechanism == 'auto':
-            self.mechs = [SPNEGOMechs.NTLMSSP]
-            self.try_kerberos = True
-        elif auth_mechanism == 'ntlm':
-            self.mechs = [SPNEGOMechs.NTLMSSP]
-            self.try_kerberos = False
-        elif auth_mechanism == 'kerberos':
-            self.mechs = []
-            self.try_kerberos = True
-            if not HAS_KERBEROS:
-                raise InvalidConfigurationException("Auth mechanism kerberos "
-                                                    "was selected but "
-                                                    "Kerberos libraries are "
-                                                    "not available")
-        else:
-            raise InvalidConfigurationException("Invalid auth mechanism value "
-                                                "%s, must be auto, ntlm or "
-                                                "kerberos"
-                                                % auth_mechanism)
-
-    @property
-    def domain(self):
-        return self.context.domain
-
-    @property
-    def username(self):
-        return self.context.username
-
-    @property
-    def password(self):
-        return self.context.password
-
-    def step(self):
-        if HAS_KERBEROS and self.try_kerberos:
-            log.debug("Attempting to create GSSAPI context and get first "
-                      "token for Kerberos authentication")
-            kerb_context = GSSApiContext(self.hostname, self._username,
-                                         self._password)
-            try:
-                first_token = kerb_context.step()
-            except gssapi.exceptions.GSSError as err:
-                # if a GSS-Error occurred in the init context, then kerberos
-                # is not available
-                error_msg = "Failed to initialise Kerberos context: %s" \
-                            % str(err)
-                if SPNEGOMechs.NTLMSSP not in self.mechs:
-                    raise AuthenticationException(error_msg)
-
-                log.warning("%s - Fallback to NTLM authentication" % error_msg)
-                self.context = NTLMContext(self.hostname, self.username,
-                                           self.password)
-                first_token = self.context.step()
-            else:
-                log.debug("GSSAPI context was successfully created, using "
-                          "Kerberos as optimistic mechanism")
-                self.context = kerb_context
-                self.mechs.insert(0, SPNEGOMechs.KRB5)
-        else:
-            log.debug("Not attmepting to create GSSAPI context, using NTLM")
-            self.context = NTLMContext(self.hostname, self._username,
-                                       self._password)
-            first_token = self.context.step()
-
-        mech_bytes = encoder.encode(self.mechs, asn1Spec=MechTypeList())
-        token = InitialContextToken()
-        for mech in self.mechs:
-            token['innerContextToken']['negTokenInit']['mechTypes'].append(
-                mech
-            )
-        token['innerContextToken']['negTokenInit']['mechToken'] = first_token
-
-        in_token = yield encoder.encode(token)
-        while not self.context.complete:
-            in_token = decoder.decode(in_token, asn1Spec=NegotiationToken())[0]
-            state = in_token['negTokenResp']['negState']
-            if state == SPNEGONegState.REJECT:
-                raise AuthenticationException("Received SPNEGO reject "
-                                              "response, authentication "
-                                              "rejected")
-
-            in_auth = bytes(in_token['negTokenResp']['responseToken'])
-            out_auth = self.context.step(in_auth)
-
-            out_token = NegotiationToken()
-            if out_auth is not None:
-                out_token['negTokenResp']['responseToken'] = out_auth
-            if self.context.complete and \
-                    not isinstance(self.context, GSSApiContext):
-                out_token['negTokenResp']['mechListMIC'] = \
-                    self.context.sign(mech_bytes)
-
-            self.complete = self.context.complete
-            token = encoder.encode(out_token) if out_token.isValue else None
-            in_token = yield token
-
-        log.debug("Verifying server's mechListMIC response")
-        token = decoder.decode(in_token, asn1Spec=NegotiationToken())[0]
-        self.context.verify(mech_bytes,
-                            bytes(token['negTokenResp']['mechListMIC']))
-        yield None
-
-    def wrap(self, data):
-        return self.context.wrap(data)
-
-    def unwrap(self, data):
-        return self.context.unwrap(data)
-
-
-class NTLMContext(object):
-
-    def __init__(self, hostname, username, password):
-        # try and get the domain part from the username
-        log.info("Setting up NTLM Security Context for user %s" % username)
-        self.hostname = hostname
-        try:
-            self.domain, self.username = username.split("\\", 1)
-        except ValueError:
-            self.username = username
-            self.domain = ''
-        self.password = password
-        self.complete = False
-
-        self._context = None
-
-    def init_context(self):
-        self._context = Ntlm()
-
-    def step(self, in_token=None):
-        if self._context is None:
-            self._context = Ntlm()
-            msg1 = self._context.create_negotiate_message(self.domain)
-            msg1 = base64.b64decode(msg1)
-            log.debug("NTLM Negotiate message: %s" % binascii.hexlify(msg1))
-            return msg1
-        else:
-            log.info("NTLM: Parsing Challenge message: %s" % in_token)
-            msg2 = base64.b64encode(in_token)
-            self._context.parse_challenge_message(msg2)
-
-            log.info("NTLM: Generating Authenticate message")
-            msg3 = self._context.create_authenticate_message(
-                user_name=self.username,
-                password=self.password,
-                domain_name=self.domain
-            )
-            self.complete = True
-            return base64.b64decode(msg3)
-
-    def wrap(self, data):
-        enc_data, enc_signature = self._context.session_security.wrap(data)
-        return enc_signature + enc_data
-
-    def unwrap(self, data):
-        return self._context.session_security.unwrap(data[16:], data[:16])
-
-    def sign(self, data):
-        # while on a normal sign we shouldn't reset the RC4 handle, for SPNEGO
-        # we need to do this so the first message is wrapped with the same
-        # state as the mechListMIC. We don't use sign/verify for anything
-        # else in CredSSP
-        # https://msdn.microsoft.com/en-us/library/gg465664.aspx
-        sess_sec = self._context.session_security
-        original_handle = deepcopy(sess_sec.outgoing_handle)
-
-        signature = self._context.session_security._get_signature(data)
-
-        # reset the RC4 handle back to before the signing occurred
-        sess_sec.outgoing_handle = original_handle
-        return signature
-
-    def verify(self, data, signature):
-        # same as sign, we need to take a copy of the incoming RC4 handle so
-        # the first message that is unwrapped is using the same base state.
-        sess_sec = self._context.session_security
-        original_handle = deepcopy(sess_sec.incoming_handle)
-
-        self._context.session_security._verify_signature(data, signature)
-
-        # reset the RC4 handle back to before the verification occurred
-        sess_sec.incoming_handle = original_handle
-
-
-class GSSApiContext(object):
-
-    def __init__(self, hostname, username, password):
-        log.info("Setting up GSSAPI Security Context for user %s" % username)
-        self.hostname = hostname
-        self.domain = ''
-        self.username = username
-        self.password = password
-        self.complete = False
-
-        self._context = None
-
-    def init_context(self):
-        log.debug("GSSAPI: Acquiring credentials handle for user %s with "
-                  "password" % self.username)
-
-        user = gssapi.Name(base=self.username,
-                           name_type=gssapi.NameType.user)
-        bpass = self.password.encode('utf-8')
-        cred = acquire_cred_with_password(user, bpass, usage='initiate')
-        log.info("GSSAPI: Acquired credentials for user %s" % str(user))
-        server_name = gssapi.Name('http@%s' % self.hostname,
-                                  name_type=gssapi.NameType.hostbased_service)
-        self._context = gssapi.SecurityContext(name=server_name,
-                                               creds=cred.creds,
-                                               usage='initiate')
-
-    def step(self, in_token=None):
-        if self._context is None:
-            self.init_context()
-
-        log.info("GSSAPI: Calling gss_init_sec_context()")
-        out_token = self._context.step(in_token)
-        self.complete = self._context.complete
-        return out_token
-
-    def wrap(self, data):
-        return self._context.wrap(data, True)[0]
-
-    def unwrap(self, data):
-        return self._context.unwrap(data)[0]
-
-    def sign(self, data):  # pragma: no cover
-        # GSSAPI doesn't supply the mechListMIC so signing and verification
-        # isn't required
-        raise NotImplementedError()
-
-    def verify(self, data, signature):  # pragma: no cover
-        # GSSAPI doesn't supply the mechListMIC so signing and verification
-        # isn't required
-        raise NotImplementedError()

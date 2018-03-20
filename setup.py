@@ -18,6 +18,7 @@ setup(
     install_requires=[
         "ntlm-auth",
         "pyasn1",
+        "six",
         "pyOpenSSL>=16.0.0",
         "requests>=2.0.0"
     ],
