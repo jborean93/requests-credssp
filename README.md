@@ -43,9 +43,9 @@ To install from source, download the source code, then run:
 ## Requirements
 
 - ntlm-auth
+- pyasn1
 - pyOpenSSL>=16.0.0
 - requests>=2.0.0
-- ordereddict (Python 2.6 Only)
 - gssapi (Kerberos auth with non Windows hosts)
 
 
@@ -62,7 +62,7 @@ Kerberos to be used;
 * The username is in the UPN form `username@REALM.COM`
 * The FQDN is used when connecting to the server
 
-You can force requests-credssp to use Kerberos or CredSSP by passing in
+You can force requests-credssp to use Kerberos or NTLM by passing in
 `auth_mechanism=<type>` in the constructor. See the examples below for more
 details.
 
@@ -89,7 +89,7 @@ used as a fallback if that fails.
 import requests
 from requests_credssp import HttpCredSSPAuth
 
-credssp_auth = HttpCredSSPAuth('domain\\user', 'password', auth_mechanism='kerberos')
+credssp_auth = HttpCredSSPAuth('user@DOMAIN.LOCAL', 'password', auth_mechanism='kerberos')
 r = requests.get("https://server:5986/wsman", auth=credssp_auth)
 ...
 ```
@@ -134,16 +134,18 @@ import requests
 from requests_credssp import HttpCredSSPAuth
 
 # build the auth request and sent an empty message to authenticate
+hostname = "server"
 session = requests.Session()
 session.auth = HttpCredSSPAuth('domain\\user', 'password')
 
-request = requests.Request('POST', 'https://server:5986/wsman', data=None)
+request = requests.Request('POST', "https://%s:5986/wsman" % server, data=None)
 prepared_request = self.session.prepare_request(request)
 response = session.send(prepared_request)
 
+context = session.auth.contexts[hostname]
 # encrypt the message using the wrap command
 message = b'hi server'
-encrypted_message = session.auth.wrap(message)
+encrypted_message = context.wrap(message)
 
 # send the encrypted message and get the encrypted response
 request = requests.Request('POST', 'https://server:5986/wsman', data=encrypted_message)
@@ -152,7 +154,25 @@ response = session.send(prepared_request)
 
 # decrypt the encrypted response from the server
 encrypted_response = response.content
-decrypted_response = session.auth.unwrap(encrypted_response)
+decrypted_response = context.unwrap(encrypted_response)
+```
+
+
+#### CredSSP Versions
+
+Recently Microsoft has released a security update to CredSSP to mitigate CVE
+2018-0886. In this update, the CredSSP protocol versions were updated from
+2-4 to 5-6 where version 2 is now 5 while the rest are 6. This change should
+be transparent to this library but you can specify a minimum server version to
+enforce in your environment. To do this supply the version when creating
+HttpCredSSPAuth like so;
+
+```
+import requests
+from requests_credssp import HttpCredSSPAuth
+
+credssp_auth = HttpCredSSPAuth('domain\\user', 'password', minimum_version=5)
+r = requests.get("https://server:5986/wsman", auth=credssp_auth)
 ```
 
 ## Logging
@@ -162,9 +182,8 @@ logged to the `requests_credssp` and `requests_credssp.credssp` named loggers.
 
 If you are receiving any errors or wish to debug the CredSSP process you should
 enable DEBUG level logs. These logs show fine grain information such as the
-protocol and cipher negotiated in the TLS handshake as well as any non
-confidential data such as the 1st 2 NTLM messages sent and received in the auth
-process.
+protocol and cipher negotiated and each CredSSP token used in the
+authentication process.
 
 
 ## Backlog

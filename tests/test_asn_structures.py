@@ -1,207 +1,447 @@
-import struct
-
 import pytest
 
-from requests_credssp.asn_structures import NegoData, TSRequest, \
-    TSCredentials, TSPasswordCreds
-from requests_credssp.exceptions import AsnStructureException, \
-    NTStatusException
+from pyasn1.codec.der import decoder, encoder
 
-from tests.expectations import *
+from requests_credssp.asn_structures import InitialContextToken, NegoData, \
+    NegoToken, NegTokenInit, NegTokenResp, NegotiationToken, SPNEGOMechs, \
+    SPNEGONegState, TSRequest, TSCredentials, TSPasswordCreds
+from requests_credssp.exceptions import NtStatusCodes, NTStatusException
 
 
-class TestASNStructures(object):
-    def test_create_negotiate_nego_data(self):
-        expected = negotiate_nego_data
+class TestSPNEGOMechs(object):
 
-        actual = NegoData()
-        actual['nego_token'].value = negotiate_token
+    def test_spnego(self):
+        expected = b"\x06\x06" \
+                   b"\x2b\x06\x01\x05\x05\x02"
+        actual = encoder.encode(SPNEGOMechs.SPNEGO)
+        assert actual == expected
 
-        assert expected == actual.get_data()
+    def test_krb5(self):
+        expected = b"\x06\x09" \
+                   b"\x2a\x86\x48\x86\xf7\x12\x01\x02" \
+                   b"\x02"
+        actual = encoder.encode(SPNEGOMechs.KRB5)
+        assert actual == expected
 
-    def test_create_negotiate_ts_request(self):
-        expected = negotiate_ts_request
+    def test_ntlmssp(self):
+        expected = b"\x06\x0a" \
+                   b"\x2b\x06\x01\x04\x01\x82\x37\x02" \
+                   b"\x02\x0a"
+        actual = encoder.encode(SPNEGOMechs.NTLMSSP)
+        assert actual == expected
 
-        actual_nego_data = NegoData()
-        actual_nego_data['nego_token'].value = negotiate_token
-        actual = TSRequest()
-        actual['nego_tokens'].value = actual_nego_data.get_data()
 
-        assert expected == actual.get_data()
+class TestNegTokenInit(object):
 
-    def test_create_authenticate_nego_data(self):
-        expected = auth_nego_data
+    def test_create(self):
+        expected = b"\x30\x23" \
+                   b"\xa0\x19" \
+                   b"\x30\x17" \
+                   b"\x06\x09" \
+                   b"\x2a\x86\x48\x86\xf7\x12\x01\x02" \
+                   b"\x02" \
+                   b"\x06\x0a" \
+                   b"\x2b\x06\x01\x04\x01\x82\x37\x02" \
+                   b"\x02\x0a" \
+                   b"\xa2\x06" \
+                   b"\x04\x04" \
+                   b"\x01\x02\x03\x04"
+        neg_token_init = NegTokenInit()
+        neg_token_init['mechTypes'].append(SPNEGOMechs.KRB5)
+        neg_token_init['mechTypes'].append(SPNEGOMechs.NTLMSSP)
+        neg_token_init['mechToken'] = b"\x01\x02\x03\x04"
+        actual = encoder.encode(neg_token_init)
+        assert actual == expected
 
-        actual = NegoData()
-        actual['nego_token'].value = auth_token
+    def test_parse(self):
+        data = b"\x30\x23" \
+               b"\xa0\x19" \
+               b"\x30\x17" \
+               b"\x06\x09" \
+               b"\x2a\x86\x48\x86\xf7\x12\x01\x02" \
+               b"\x02" \
+               b"\x06\x0a" \
+               b"\x2b\x06\x01\x04\x01\x82\x37\x02" \
+               b"\x02\x0a" \
+               b"\xa2\x06" \
+               b"\x04\x04" \
+               b"\x01\x02\x03\x04"
+        actual, remaining = decoder.decode(data, asn1Spec=NegTokenInit())
+        assert remaining == b""
+        assert len(actual['mechTypes']) == 2
+        assert actual['mechTypes'][0] == SPNEGOMechs.KRB5
+        assert actual['mechTypes'][1] == SPNEGOMechs.NTLMSSP
+        assert actual['mechToken'] == b"\x01\x02\x03\x04"
 
-        assert expected == actual.get_data()
 
-    def test_create_authenticate_ts_request(self):
-        expected = auth_ts_request
+class TestNegTokenResp(object):
 
-        actual_nego_data = NegoData()
-        actual_nego_data['nego_token'].value = auth_token
+    def test_create(self):
+        expected = b"\x30\x15" \
+                   b"\xa0\x03" \
+                   b"\x0a\x01" \
+                   b"\x01" \
+                   b"\xa2\x06" \
+                   b"\x04\x04" \
+                   b"\x05\x06\x07\x08" \
+                   b"\xa3\x06" \
+                   b"\x04\x04" \
+                   b"\x09\x0a\x0b\x0c"
+        neg_token_resp = NegTokenResp()
+        neg_token_resp['negState'] = SPNEGONegState.ACCEPT_INCOMPLETE
+        neg_token_resp['responseToken'] = b"\x05\x06\x07\x08"
+        neg_token_resp['mechListMIC'] = b"\x09\x0a\x0b\x0c"
+        actual = encoder.encode(neg_token_resp)
+        assert actual == expected
 
-        actual = TSRequest()
-        actual['nego_tokens'].value = actual_nego_data.get_data()
-        actual['pub_key_auth'].value = pub_key_token
+    def test_parse(self):
+        data = b"\x30\x1f" \
+               b"\xa0\x03" \
+               b"\x0a\x01" \
+               b"\x01" \
+               b"\xa1\x08" \
+               b"\x06\x06" \
+               b"\x2b\x06\x01\x05\x05\x02" \
+               b"\xa2\x06" \
+               b"\x04\x04" \
+               b"\x05\x06\x07\x08" \
+               b"\xa3\x06" \
+               b"\x04\x04" \
+               b"\x09\x0a\x0b\x0c"
+        actual, remaining = decoder.decode(data, asn1Spec=NegTokenResp())
+        assert remaining == b""
+        assert actual['negState'] == SPNEGONegState.ACCEPT_INCOMPLETE
+        assert actual['supportedMech'] == SPNEGOMechs.SPNEGO
+        assert actual['responseToken'] == b"\x05\x06\x07\x08"
+        assert actual['mechListMIC'] == b"\x09\x0a\x0b\x0c"
 
-        assert expected == actual.get_data()
 
-    def test_create_ts_password_credentials(self):
-        expected = credential_ts_password_creds
+class TestNegotiationToken(object):
 
-        actual = TSPasswordCreds()
-        actual['domain_name'].value = domain
-        actual['user_name'].value = user
-        actual['password'].value = password
+    def test_create_init(self):
+        expected = b"\xa0\x1a" \
+                   b"\x30\x18" \
+                   b"\xa0\x0e" \
+                   b"\x30\x0c" \
+                   b"\x06\x0a" \
+                   b"\x2b\x06\x01\x04\x01\x82\x37\x02" \
+                   b"\x02\x0a" \
+                   b"\xa2\x06" \
+                   b"\x04\x04" \
+                   b"\x01\x02\x03\x04"
+        negotiation_token = NegotiationToken()
+        negotiation_token['negTokenInit']['mechTypes'].append(
+            SPNEGOMechs.NTLMSSP
+        )
+        negotiation_token['negTokenInit']['mechToken'] = b"\x01\x02\x03\x04"
+        actual = encoder.encode(negotiation_token)
+        assert actual == expected
 
-        assert expected == actual.get_data()
+    def test_create_resp(self):
+        expected = b"\xa1\x0f" \
+                   b"\x30\x0d" \
+                   b"\xa0\x03" \
+                   b"\x0a\x01" \
+                   b"\x00" \
+                   b"\xa2\x06" \
+                   b"\x04\x04" \
+                   b"\x01\x02\x03\x04"
+        negotiation_token = NegotiationToken()
+        negotiation_token['negTokenResp']['negState'] = \
+            SPNEGONegState.ACCEPT_COMPLETE
+        negotiation_token['negTokenResp']['responseToken'] = \
+            b"\x01\x02\x03\x04"
+        actual = encoder.encode(negotiation_token)
+        assert actual == expected
 
-    def test_create_ts_credentials(self):
-        expected = credential_ts_credentials
+    def test_parse_init(self):
+        data = b"\xa0\x1a" \
+               b"\x30\x18" \
+               b"\xa0\x0e" \
+               b"\x30\x0c" \
+               b"\x06\x0a" \
+               b"\x2b\x06\x01\x04\x01\x82\x37\x02" \
+               b"\x02\x0a" \
+               b"\xa2\x06" \
+               b"\x04\x04" \
+               b"\x01\x02\x03\x04"
+        actual, remaining = decoder.decode(data, asn1Spec=NegotiationToken())
+        assert remaining == b""
+        mech_types = actual['negTokenInit']['mechTypes']
+        assert len(mech_types) == 1
+        assert mech_types[0] == SPNEGOMechs.NTLMSSP
+        assert actual['negTokenInit']['mechToken'] == b"\x01\x02\x03\x04"
 
-        actual_creds = TSPasswordCreds()
-        actual_creds['domain_name'].value = domain
-        actual_creds['user_name'].value = user
-        actual_creds['password'].value = password
+    def test_parse_resp(self):
+        data = b"\xa1\x0f" \
+               b"\x30\x0d" \
+               b"\xa0\x03" \
+               b"\x0a\x01" \
+               b"\x00" \
+               b"\xa2\x06" \
+               b"\x04\x04" \
+               b"\x01\x02\x03\x04"
+        actual, remaining = decoder.decode(data, asn1Spec=NegotiationToken())
+        assert remaining == b""
+        assert actual['negTokenResp']['negState'] == \
+            SPNEGONegState.ACCEPT_COMPLETE
+        assert actual['negTokenResp']['responseToken'] == b"\x01\x02\x03\x04"
 
-        actual = TSCredentials()
-        actual['cred_type'].value = struct.pack('B', 1)
-        actual['credentials'].value = actual_creds.get_data()
 
-        assert expected == actual.get_data()
+class TestInitialContextToken(object):
 
-    def test_create_credential_ts_request(self):
-        expected = credential_ts_request
+    def test_create(self):
+        expected = b"\x60\x24" \
+                   b"\x06\x06" \
+                   b"\x2b\x06\x01\x05\x05\x02" \
+                   b"\xa0\x1a" \
+                   b"\x30\x18" \
+                   b"\xa0\x0e" \
+                   b"\x30\x0c" \
+                   b"\x06\x0a" \
+                   b"\x2b\x06\x01\x04\x01\x82\x37\x02" \
+                   b"\x02\x0a" \
+                   b"\xa2\x06" \
+                   b"\x04\x04" \
+                   b"\x01\x02\x03\x04"
+        token = InitialContextToken()
+        token['innerContextToken']['negTokenInit']['mechTypes'].append(
+            SPNEGOMechs.NTLMSSP
+        )
+        token['innerContextToken']['negTokenInit']['mechToken'] = \
+            b"\x01\x02\x03\x04"
+        actual = encoder.encode(token)
+        assert actual == expected
 
-        actual = TSRequest()
-        actual['auth_info'].value = credentials_encrypted_password_creds
+    def test_parse(self):
+        data = b"\x60\x24" \
+               b"\x06\x06" \
+               b"\x2b\x06\x01\x05\x05\x02" \
+               b"\xa0\x1a" \
+               b"\x30\x18" \
+               b"\xa0\x0e" \
+               b"\x30\x0c" \
+               b"\x06\x0a" \
+               b"\x2b\x06\x01\x04\x01\x82\x37\x02" \
+               b"\x02\x0a" \
+               b"\xa2\x06" \
+               b"\x04\x04" \
+               b"\x01\x02\x03\x04"
+        actual, remaining = \
+            decoder.decode(data, asn1Spec=InitialContextToken())
+        assert remaining == b""
+        assert actual['thisMech'] == SPNEGOMechs.SPNEGO
+        mech_types = actual['innerContextToken']['negTokenInit']['mechTypes']
+        assert len(mech_types) == 1
+        assert mech_types[0] == SPNEGOMechs.NTLMSSP
+        assert actual['innerContextToken']['negTokenInit']['mechToken'] == \
+            b"\x01\x02\x03\x04"
 
-        assert expected == actual.get_data()
 
-    def test_get_empty_field(self):
-        with pytest.raises(AsnStructureException) as exc:
-            actual = TSRequest()
-            actual.parse_data(credential_ts_request)
-            actual['fake_field']
+class TestNegoToken(object):
 
-        assert str(exc.value) == 'Illegal field fake_field in ASN.1 structure'
+    def test_create(self):
+        expected = b"\x30\x08" \
+                   b"\xa0\x06" \
+                   b"\x04\x04" \
+                   b"\x05\x06\x07\x08"
+        nego_token = NegoToken()
+        nego_token['negoToken'] = b"\x05\x06\x07\x08"
+        actual = encoder.encode(nego_token)
+        assert actual == expected
 
-    def test_get_data_with_missing_mandatory_field(self):
-        with pytest.raises(AsnStructureException) as exc:
-            test_password_creds = TSPasswordCreds()
-            test_password_creds['user_name'] = 'test'.encode('utf-16le')
-            test_password_creds.get_data()
+    def test_parse(self):
+        data = b"\x30\x08" \
+               b"\xa0\x06" \
+               b"\x04\x04" \
+               b"\x05\x06\x07\x08"
+        actual, remaining = decoder.decode(data, asn1Spec=NegoToken())
+        assert remaining == b""
+        assert actual['negoToken'] == b"\x05\x06\x07\x08"
 
-        assert str(exc.value) == 'Cannot get data for mandatory field ' \
-                                 'domainName, value is not set'
 
-    def test_parse_challenge_ts_request(self):
-        expected = challenge_token
+class TestNegoData(object):
 
-        actual_ts_request = TSRequest()
-        actual_ts_request.parse_data(challenge_ts_request)
+    def test_create(self):
+        expected = b"\x30\x0a" \
+                   b"\x30\x08" \
+                   b"\xa0\x06" \
+                   b"\x04\x04" \
+                   b"\x01\x02\x03\x04"
+        nego_data = NegoData()
+        nego_data[0]['negoToken'] = b"\x01\x02\x03\x04"
+        actual = encoder.encode(nego_data)
+        assert actual == expected
 
-        actual = NegoData()
-        actual.parse_data(actual_ts_request['nego_tokens'].value)
+    def test_parse(self):
+        data = b"\x30\x0a" \
+               b"\x30\x08" \
+               b"\xa0\x06" \
+               b"\x04\x04" \
+               b"\x01\x02\x03\x04"
+        actual, remaining = decoder.decode(data, asn1Spec=NegoData())
+        assert remaining == b""
+        assert len(actual) == 1
+        assert actual[0]['negoToken'] == b"\x01\x02\x03\x04"
 
-        assert expected == actual['nego_token'].value
 
-    def test_parse_ts_request_invalid_sequence(self):
-        test_data = b'\x30\x13\xA0\x03\x02\x01\x03\xA6' \
-                    b'\x03\x02\x01\x01'
+class TestTSRequest(object):
 
-        with pytest.raises(AsnStructureException) as exc:
-            test_ts_request = TSRequest()
-            test_ts_request.parse_data(test_data)
+    def test_create(self):
+        expected = b"\x30\x30" \
+                   b"\xa0\x03" \
+                   b"\x02\x01" \
+                   b"\x06" \
+                   b"\xa1\x0c" \
+                   b"\x30\x0a" \
+                   b"\x30\x08" \
+                   b"\xa0\x06" \
+                   b"\x04\x04" \
+                   b"\xaa\xbb\xcc\xdd" \
+                   b"\xa2\x06" \
+                   b"\x04\x04" \
+                   b"\x01\x02\x03\x04" \
+                   b"\xa3\x06" \
+                   b"\x04\x04" \
+                   b"\x05\x06\x07\x08" \
+                   b"\xa4\x03" \
+                   b"\x02\x01" \
+                   b"\x02" \
+                   b"\xa5\x06" \
+                   b"\x04\x04" \
+                   b"\x09\x0a\x0b\x0d"
+        ts_request = TSRequest()
+        nego_token = NegoToken()
+        nego_token['negoToken'] = b"\xaa\xbb\xcc\xdd"
+        ts_request['negoTokens'].append(nego_token)
+        ts_request['authInfo'] = b"\x01\x02\x03\x04"
+        ts_request['pubKeyAuth'] = b"\x05\x06\x07\x08"
+        ts_request['errorCode'] = 2
+        ts_request['clientNonce'] = b"\x09\x0a\x0b\x0d"
+        actual = encoder.encode(ts_request)
+        assert actual == expected
 
-        assert str(exc.value) == 'Unknown sequence byte (a6) in sequence'
+    def test_parse(self):
+        data = b"\x30\x30" \
+               b"\xa0\x03" \
+               b"\x02\x01" \
+               b"\x06" \
+               b"\xa1\x0c" \
+               b"\x30\x0a" \
+               b"\x30\x08" \
+               b"\xa0\x06" \
+               b"\x04\x04" \
+               b"\xaa\xbb\xcc\xdd" \
+               b"\xa2\x06" \
+               b"\x04\x04" \
+               b"\x01\x02\x03\x04" \
+               b"\xa3\x06" \
+               b"\x04\x04" \
+               b"\x05\x06\x07\x08" \
+               b"\xa4\x03" \
+               b"\x02\x01" \
+               b"\x02" \
+               b"\xa5\x06" \
+               b"\x04\x04" \
+               b"\x09\x0a\x0b\x0d"
+        actual, remaining = decoder.decode(data, asn1Spec=TSRequest())
+        assert remaining == b""
+        assert actual['version'] == 6
+        assert len(actual['negoTokens']) == 1
+        assert actual['negoTokens'][0]['negoToken'] == b"\xaa\xbb\xcc\xdd"
+        assert actual['authInfo'] == b"\x01\x02\x03\x04"
+        assert actual['pubKeyAuth'] == b"\x05\x06\x07\x08"
+        assert actual['errorCode'] == 2
+        assert actual['clientNonce'] == b"\x09\x0a\x0b\x0d"
 
-    def test_parse_nego_data_wrong_sequence(self):
-        test_data = b'\x30\x05\xA5\x03\x04\x01\x03'
+    def test_check_error_no_code_set(self):
+        ts_request = TSRequest()
+        ts_request.check_error_code()
 
-        with pytest.raises(AsnStructureException) as exc:
-            test_nego_data = NegoData()
-            test_nego_data.parse_data(test_data)
+    def test_check_error_code_success(self):
+        ts_request = TSRequest()
+        ts_request['errorCode'] = NtStatusCodes.STATUS_SUCCESS
+        ts_request.check_error_code()
 
-        assert str(exc.value) == \
-            'Expecting sequence (a0) for negoToken, was (a5)'
-
-    def test_parse_nego_data_wrong_type(self):
-        test_data = b'\x30\x05\xA0\x03\x02\x01\x03'
-
-        with pytest.raises(AsnStructureException) as exc:
-            test_nego_data = NegoData()
-            test_nego_data.parse_data(test_data)
-
-        assert str(exc.value) == 'Expecting negoToken type to be (4), was (2)'
-
-    def test_parse_nego_data_wrong_structure_type(self):
-        test_data = b'\x31\x05\xA0\x03\x04\x01\x03'
-
-        with pytest.raises(AsnStructureException) as exc:
-            test_nego_data = NegoData()
-            test_nego_data.parse_data(test_data)
-
-        assert str(exc.value) == 'Expecting NegoData type to be (30), was (31)'
-
-    def test_parse_public_key(self):
-        expected = server_pub_key_token
-
-        actual = TSRequest()
-        actual.parse_data(public_key_ts_request)
-
-        assert expected == actual['pub_key_auth'].value
-
-    def test_parse_ts_request_wrong_type(self):
-        test_data = b'\xA0\x00\x00\x00\x00'
-
-        with pytest.raises(AsnStructureException) as exc:
-            test_ts_request = TSRequest()
-            test_ts_request.parse_data(test_data)
-
-        assert str(exc.value) == \
-            'Expecting TSRequest type to be (30), was (a0)'
-
-    def test_check_error_code_version_2_none(self):
-        test_ts_request = TSRequest()
-        test_ts_request.parse_data(challenge_ts_request)
-        test_ts_request.check_error_code()
-
-        assert test_ts_request['error_code'].value is None
-
-    def test_check_error_code_version_3_none(self):
-        test_data = b'\x30\x09\xA0\x03\x02\x01\x03'
-
-        test_ts_request = TSRequest()
-        test_ts_request.parse_data(test_data)
-        test_ts_request.check_error_code()
-
-        assert test_ts_request['error_code'].value is None
-
-    def test_check_error_code_logon_failure(self):
-        expected_byte = b'c000006d'
-        test_data = b'\x30\x13\xA0\x03\x02\x01\x03\xA4' \
-                    b'\x06\x02\x04\xC0\x00\x00\x6D'
-
+    def test_check_error_code_fail(self):
+        ts_request = TSRequest()
+        ts_request['errorCode'] = NtStatusCodes.STATUS_LOGON_FAILURE
         with pytest.raises(NTStatusException) as exc:
-            test_ts_request = TSRequest()
-            test_ts_request.parse_data(test_data)
-            test_ts_request.check_error_code()
+            ts_request.check_error_code()
+        assert str(exc.value) == "Received error status from the server: " \
+                                 "(3221225581) STATUS_LOGON_FAILURE 0xc000006d"
 
-        assert str(exc.value) == 'STATUS_LOGON_FAILURE - %s' % expected_byte
 
-    def test_check_error_code_undefinied(self):
-        expected_byte = b'c000006e'
-        test_data = b'\x30\x13\xA0\x03\x02\x01\x03\xA4' \
-                    b'\x06\x02\x04\xC0\x00\x00\x6E'
+class TestTSCredentials(object):
 
-        with pytest.raises(NTStatusException) as exc:
-            test_ts_request = TSRequest()
-            test_ts_request.parse_data(test_data)
-            test_ts_request.check_error_code()
+    def test_create(self):
+        expected = b"\x30\x0d" \
+                   b"\xa0\x03" \
+                   b"\x02\x01" \
+                   b"\x01" \
+                   b"\xa1\x06" \
+                   b"\x04\x04" \
+                   b"\x01\x02\x03\x04"
+        ts_credentials = TSCredentials()
+        ts_credentials['credType'] = 1
+        ts_credentials['credentials'] = b"\x01\x02\x03\x04"
+        actual = encoder.encode(ts_credentials)
+        assert actual == expected
 
-        assert str(exc.value) == \
-            'NTSTATUS error: Not Defined %s' % expected_byte
+    def test_parse(self):
+        data = b"\x30\x0d" \
+               b"\xa0\x03" \
+               b"\x02\x01" \
+               b"\x01" \
+               b"\xa1\x06" \
+               b"\x04\x04" \
+               b"\x01\x02\x03\x04"
+        actual, remaining = decoder.decode(data, asn1Spec=TSCredentials())
+        assert remaining == b""
+        assert actual['credType'] == 1
+        assert actual['credentials'] == b"\x01\x02\x03\x04"
+
+
+class TestTSPasswordCreds(object):
+
+    def test_create(self):
+        expected = b"\x30\x38" \
+                   b"\xa0\x0e" \
+                   b"\x04\x0c" \
+                   b"\x64\x00\x6f\x00\x6d\x00\x61\x00" \
+                   b"\x69\x00\x6e\x00" \
+                   b"\xa1\x12" \
+                   b"\x04\x10" \
+                   b"\x75\x00\x73\x00\x65\x00\x72\x00" \
+                   b"\x6e\x00\x61\x00\x6d\x00\x65\x00" \
+                   b"\xa2\x12" \
+                   b"\x04\x10" \
+                   b"\x70\x00\x61\x00\x73\x00\x73\x00" \
+                   b"\x77\x00\x6f\x00\x72\x00\x64\x00"
+        ts_password_creds = TSPasswordCreds()
+        ts_password_creds['domainName'] = "domain".encode('utf-16-le')
+        ts_password_creds['userName'] = "username".encode('utf-16-le')
+        ts_password_creds['password'] = "password".encode('utf-16-le')
+        actual = encoder.encode(ts_password_creds)
+        assert actual == expected
+
+    def test_parse(self):
+        data = b"\x30\x38" \
+               b"\xa0\x0e" \
+               b"\x04\x0c" \
+               b"\x64\x00\x6f\x00\x6d\x00\x61\x00" \
+               b"\x69\x00\x6e\x00" \
+               b"\xa1\x12" \
+               b"\x04\x10" \
+               b"\x75\x00\x73\x00\x65\x00\x72\x00" \
+               b"\x6e\x00\x61\x00\x6d\x00\x65\x00" \
+               b"\xa2\x12" \
+               b"\x04\x10" \
+               b"\x70\x00\x61\x00\x73\x00\x73\x00" \
+               b"\x77\x00\x6f\x00\x72\x00\x64\x00"
+        actual, remaining = decoder.decode(data, asn1Spec=TSPasswordCreds())
+        assert remaining == b""
+        assert isinstance(actual, TSPasswordCreds)
+        assert actual['domainName'] == "domain".encode('utf-16-le')
+        assert actual['userName'] == "username".encode('utf-16-le')
+        assert actual['password'] == "password".encode('utf-16-le')

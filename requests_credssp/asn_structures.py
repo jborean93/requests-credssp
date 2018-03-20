@@ -1,32 +1,276 @@
-import binascii
-import struct
+# Copyright: (c) 2018, Jordan Borean (@jborean93) <jborean93@gmail.com>
+# MIT License (see LICENSE or https://opensource.org/licenses/MIT)
 
-import requests_credssp.asn_helper as asn_helper
-from requests_credssp.exceptions import AsnStructureException, \
-    parse_nt_status_exceptions
+import ctypes
 
-try:
-    from collections import OrderedDict
-except ImportError:  # pragma: no cover
-    from ordereddict import OrderedDict
+from pyasn1.type.constraint import SingleValueConstraint
+from pyasn1.type.namedtype import NamedType, NamedTypes, OptionalNamedType
+from pyasn1.type.namedval import NamedValues
+from pyasn1.type.tag import Tag, tagClassApplication, tagClassContext, \
+    tagFormatConstructed, tagFormatSimple, TagSet
+from pyasn1.type.univ import BitString, Choice, Enumerated, Integer, \
+    ObjectIdentifier, OctetString, Sequence, SequenceOf
+
+from requests_credssp.exceptions import NtStatusCodes, NTStatusException
 
 
-class TSRequest(asn_helper.ASN1Sequence):
+class SPNEGOMechs(object):
+    SPNEGO = ObjectIdentifier('1.3.6.1.5.5.2')
+    KRB5 = ObjectIdentifier('1.2.840.113554.1.2.2')
+    NTLMSSP = ObjectIdentifier('1.3.6.1.4.1.311.2.2.10')
+
+
+class SPNEGONegState(object):
+    ACCEPT_COMPLETE = 0
+    ACCEPT_INCOMPLETE = 1
+    REJECT = 2
+    REQUEST_MIC = 3
+
+
+class MechType(ObjectIdentifier):
     """
-    [MS-CSSP] v13.0 2016-07-14
+    [RFC-4178] 4.1. Mechanism Types
+
+    OID represents one GSS-API mechanism according to RFC-2743.
+
+    MechType ::= OBJECT IDENTIFIER
+    """
+    pass
+
+
+class MechTypeList(SequenceOf):
+    """
+    [RFC-4178] 4.1. Mechanism Types
+
+    List of MechTypes
+
+    MechTypeList ::= SEQUENCE OF MechType
+    """
+    componentType = MechType()
+
+
+class ContextFlags(BitString):
+    """
+    [RFC-4178] 4.2.1. negTokenInit ContextFlags
+
+    ContextFlags ::= BIT STRING {
+        delegFlag (0),
+        mutualFlag (1),
+        replayFlag (2),
+        sequenceFlag (3),
+        anonFlag (4),
+        confFlag (5),
+        integFlag (6)
+    }
+    """
+    componentType = NamedValues(
+        ('delegFlag', 0),
+        ('mutualFlag', 1),
+        ('replayFlag', 2),
+        ('sequenceFlag', 3),
+        ('anonFlag', 4),
+        ('confFlag', 5),
+        ('integFlag', 6)
+    )
+
+
+class NegState(Enumerated):
+    """
+    [RFC-4178] 4.2.2. negTokenResp - negState
+
+    NegState ::= ENUMERATED {
+        accept-completed (0),
+        accept-incomplete (1),
+        reject (2),
+        request-mic (3)
+    }
+    """
+    namedValues = NamedValues(
+        ('accept-complete', SPNEGONegState.ACCEPT_COMPLETE),
+        ('accept-incomplete', SPNEGONegState.ACCEPT_INCOMPLETE),
+        ('reject', SPNEGONegState.REJECT),
+        ('request-mic', SPNEGONegState.REQUEST_MIC)
+    )
+    subtypeSpec = Enumerated.subtypeSpec + SingleValueConstraint(
+        SPNEGONegState.ACCEPT_COMPLETE,
+        SPNEGONegState.ACCEPT_INCOMPLETE,
+        SPNEGONegState.REJECT,
+        SPNEGONegState.REQUEST_MIC
+    )
+
+
+class NegTokenInit(Sequence):
+    """
+    [RFC-4178] 4.2.1. negTokenInit
+
+    The initial message for SPNEGO messages.
+
+    NegTokenInit ::= SEQUENCE {
+        mechTypes   [0] MechTypeList,
+        regFlags    [1] ContextFlags OPTIONAL,
+        mechToken   [2] OCTET STRING OPTIONAL,
+        mechListMIC [3] OCTER STRING OPTIONAL
+    }
+    """
+    componentType = NamedTypes(
+        NamedType(
+            'mechTypes', MechTypeList().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 0)
+            )
+        ),
+        OptionalNamedType(
+            'reqFlags', ContextFlags().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 1)
+            )
+        ),
+        OptionalNamedType(
+            'mechToken', OctetString().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatSimple, 2)
+            )
+        ),
+        OptionalNamedType(
+            'mechListMIC', OctetString().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatSimple, 3)
+            )
+        )
+    )
+
+
+class NegTokenResp(Sequence):
+    """
+    [RFC-4178] 4.2.2. negTokenResp
+
+    Used as the message structure for all subsequent SPNEGO messages.
+
+    NegTokenResp ::= SEQUENCE {
+        negState        [0] NegState OPTIONAL,
+        supportedMech   [1] MechType OPTIONAL,
+        responseToken   [2] OCTET STRING OPTIONAL,
+        mechListMIC     [3] OCTET STRING OPTIONAL
+    }
+    """
+    componentType = NamedTypes(
+        OptionalNamedType(
+            'negState', NegState().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 0)
+            )
+        ),
+        OptionalNamedType(
+            'supportedMech', MechType().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 1)
+            )
+        ),
+        OptionalNamedType(
+            'responseToken', OctetString().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 2)
+            )
+        ),
+        OptionalNamedType(
+            'mechListMIC', OctetString().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 3)
+            )
+        )
+    )
+
+
+class NegotiationToken(Choice):
+    """
+    [RFC-4178] 4.2. Negotiation Tokens
+
+    This is the container used in InitialContextToken and then sent for
+    subsequent SPNEGO messages.
+
+    NegotiationToken ::= CHOICE {
+        negTokenInit    [0] NegTokenInit,
+        negTokenResp    [1] NegTokenResp
+    }
+    """
+    componentType = NamedTypes(
+        NamedType(
+            'negTokenInit', NegTokenInit().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 0)
+            )
+        ),
+        NamedType(
+            'negTokenResp', NegTokenResp().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 1)
+            )
+        )
+    )
+
+
+class InitialContextToken(Sequence):
+    """
+    [RFC-2743] 3.1. Mechanism-Independent Token Format
+
+    This section specifies a mechanism-independent level of encapsulating
+    representation for the initial token of a GSS-API context establishment
+    sequence.
+
+    InitialContextToken ::= [APPLICATION 0] IMPLICIT SEQUENCE {
+        thisMech MechType,
+        innerContextToken NegotiateToken
+    }
+    """
+    componentType = NamedTypes(
+        NamedType(
+            'thisMech', MechType()
+        ),
+        NamedType(
+            'innerContextToken', NegotiationToken()
+        )
+    )
+    tagSet = TagSet(
+        Sequence.tagSet,
+        Tag(tagClassApplication, tagFormatConstructed, 0)
+    )
+
+    def __init__(self, **kwargs):
+        super(InitialContextToken, self).__init__(**kwargs)
+        self['thisMech'] = SPNEGOMechs.SPNEGO
+
+
+class NegoToken(Sequence):
+    componentType = NamedTypes(
+        NamedType(
+            'negoToken', OctetString().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 0)
+            )
+        )
+    )
+
+
+class NegoData(SequenceOf):
+    """
+    [MS-CSSP] 2.2.1.1 NegoData
+    https://msdn.microsoft.com/en-us/library/cc226781.aspx
+
+    Contains the SPNEGO tokens, Kerberos or NTLM messages.
+
+    NegoData ::= SEQUENCE OF SEQUENCE {
+        negoToken [0] OCTET STRING
+    }
+    """
+    componentType = NegoToken()
+
+
+class TSRequest(Sequence):
+    """
+    [MS-CSSP] 2.2.1 TSRequest
+    https://msdn.microsoft.com/en-us/library/cc226780.aspx
+
+    Top-most structure used by the client and server and contains various
+    different types of data depending on the stage of the CredSSP protocol it
+    is at.
 
     TSRequest ::= SEQUENCE {
-        version     [0] INTEGER,
-        negoTokens  [1] NegoData OPTIONAL,
-        authInfo    [2] OCTET STRING OPTIONAL,
-        pubKeyAuth  [3] OCTET STRING OPTIONAL,
-        errorCode   [4] INTEGER OPTIONAL
+        version    [0] INTEGER,
+        negoTokens [1] NegoData  OPTIONAL,
+        authInfo   [2] OCTET STRING OPTIONAL,
+        pubKeyAuth [3] OCTET STRING OPTIONAL,
+        errorCode  [4] INTEGER OPTIONAL,
+        clientNonce [5] OCTER STRING OPTIONAL,
     }
-
-    The TSRequest struct is the top-most structure used by the CredSSP client
-    and the CredSSP server. The TSRequest message is always sent over the
-    TLS-encrypted channel between the client and the server in a CredSSP
-    Protocol exchange.
 
     Fields:
         version: Specifies the support version of the CredSSP Protocol. Valid
@@ -38,179 +282,127 @@ class TSRequest(asn_helper.ASN1Sequence):
         pubKeyAuth: Contains the server's public key info to stop man in the
             middle attacks
         errorCode: When version is 3, the server can send the NTSTATUS failure
-            code (Only Server 2012 R2 and newer)
+            codes (Only Server 2012 R2 and newer)
+        clientNonce: A 32-byte array of cryptographically random bytes, only
+            used in version 5 or higher of this protocol
     """
+    CLIENT_VERSION = 6
 
-    def __init__(self):
-        self.name = 'TSRequest'
-        self.type = asn_helper.ASN1_TYPE_SEQUENCE
-
-        self.fields = OrderedDict()
-        self['version'] = asn_helper.ASN1Field(
-            'version', 0xa0, asn_helper.ASN1_TYPE_INTEGER
-        )
-        self['nego_tokens'] = asn_helper.ASN1Field(
-            'negoTokens', 0xa1, asn_helper.ASN1_TYPE_SEQUENCE, True
-        )
-        self['auth_info'] = asn_helper.ASN1Field(
-            'authInfo', 0xa2, asn_helper.ASN1_TYPE_OCTET_STRING, True
-        )
-        self['pub_key_auth'] = asn_helper.ASN1Field(
-            'pubKeyInfo', 0xa3, asn_helper.ASN1_TYPE_OCTET_STRING, True
-        )
-        self['error_code'] = asn_helper.ASN1Field(
-            'errorCode', 0xa4, asn_helper.ASN1_TYPE_INTEGER, True
-        )
-
-        # When creating this object set the version to 3, if parsing data this
-        # value will be overwritten
-        self['version'].value = struct.pack('B', 3)
-
-    def parse_data(self, data):
-        """
-        Populates the TSRequest object with the data supplied. Need to override
-        the default ASN1Sequence class as this structure has optional values
-        which hasn't been implemented in the generic structure
-
-        :param data: An ASN.1 data structure to be parsed
-        """
-        type_byte = struct.unpack('B', data[:1])[0]
-        if type_byte != self.type:
-            raise AsnStructureException(
-                "Expecting %s type to be (%x), was (%x)"
-                % (self.name, self.type, type_byte)
+    componentType = NamedTypes(
+        NamedType(
+            'version', Integer().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 0)
             )
+        ),
+        OptionalNamedType(
+            'negoTokens', NegoData().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 1)
+            )
+        ),
+        OptionalNamedType(
+            'authInfo', OctetString().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 2)
+            )
+        ),
+        OptionalNamedType(
+            'pubKeyAuth', OctetString().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 3)
+            )
+        ),
+        OptionalNamedType(
+            'errorCode', Integer().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 4)
+            )
+        ),
+        OptionalNamedType(
+            'clientNonce', OctetString().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 5)
+            )
+        )
+    )
 
-        decoded_data, total_bytes = asn_helper.unpack_asn1(data)
-
-        # Remove the bytes from the original type and length for comparison
-        # later
-        total_bytes -= total_bytes - len(decoded_data)
-
-        version_offset = asn_helper.parse_context_field(decoded_data,
-                                                        self['version'])
-        new_offset = version_offset
-
-        # Get the remaining values in the structure
-        while new_offset != total_bytes:
-            invalid_sequence = True
-            field_data = decoded_data[new_offset:]
-            sequence_byte = struct.unpack('B', field_data[:1])[0]
-
-            for field in self.fields:
-                field_info = self.fields[field]
-
-                if sequence_byte == field_info.sequence:
-                    invalid_sequence = False
-                    value_offset = asn_helper.parse_context_field(field_data,
-                                                                  self[field])
-                    new_offset += value_offset
-
-            if invalid_sequence:
-                raise AsnStructureException(
-                    'Unknown sequence byte (%x) in sequence' % sequence_byte
-                )
+    def __init__(self, **kwargs):
+        super(TSRequest, self).__init__(**kwargs)
+        self['version'] = self.CLIENT_VERSION
 
     def check_error_code(self):
         """
-        On CredSSP version 3 messages the server can respond with NTSTATUS
-        error codes with the details of what went wrong. This method will check
-        if the error code exists and throw an exception if it does.
+        For CredSSP version of 3 or newer, the server can response with an
+        NtStatus error code with details of what error occurred. This method
+        will check if the error code exists and throws an NTStatusException
+        if it is no STATUS_SUCCESS.
         """
-        if self['version'].value >= struct.pack('B', 3):
-            error_code = self['error_code'].value
-            if error_code is not None:
-                hex_error = binascii.hexlify(error_code)
-                parse_nt_status_exceptions(hex_error)
+        # start off with STATUS_SUCCESS as a baseline
+        status = NtStatusCodes.STATUS_SUCCESS
+
+        error_code = self['errorCode']
+        if error_code.isValue:
+            # ASN.1 Integer is stored as an signed integer, we need to
+            # convert it to a unsigned integer
+            status = ctypes.c_uint32(error_code).value
+
+        if status != NtStatusCodes.STATUS_SUCCESS:
+            raise NTStatusException(status)
 
 
-class NegoData(asn_helper.ASN1Sequence):
+class TSCredentials(Sequence):
     """
-    [MS-CSSP] v13.0 2016-07-14
+    [MS-CSSP] 2.2.1.2 TSCredentials
+    https://msdn.microsoft.com/en-us/library/cc226782.aspx
 
-    NegoData ::= SEQUENCE OF SEQUENCE {
-        negoToken [0] OCTET STRING
-    }
-    The NegoData structure contains the SPEGNO tokens, the Kerberos messages,
-    or the NTLM messages.
-
-    Fields:
-        negoToken: One or more SPEGNO tokens, Kerberos messages or NTLM
-            messages used for intial auth
-    """
-
-    def __init__(self):
-        self.name = 'NegoData'
-        self.type = asn_helper.ASN1_TYPE_SEQUENCE
-
-        self.fields = OrderedDict()
-        self['nego_token'] = asn_helper.ASN1Field(
-            'negoToken', 0xa0, asn_helper.ASN1_TYPE_OCTET_STRING
-        )
-
-
-class TSCredentials(asn_helper.ASN1Sequence):
-    """
-    [MS-CSSP] v13.0 2016-07-14
+    Contains the user's credentials and their type to send to the server.
 
     TSCredentials ::= SEQUENCE {
         credType    [0] INTEGER,
         credentials [1] OCTET STRING
     }
-    The TS Credentials structure contains both the user's credentials that are
-    delegated to the server and their type.
-
-    Fields:
-        credType: Defines the type of credentials that are carried in the
-            credentials field. (1, 2 or 6)
-        credentials: Contains the user's credentials based on the credType
-            structure above. Only TSPasswordCreds (1) right now
     """
-    def __init__(self):
-        self.name = 'TSCredentials'
-        self.type = asn_helper.ASN1_TYPE_SEQUENCE
-
-        self.fields = OrderedDict()
-        self['cred_type'] = asn_helper.ASN1Field(
-            'credType', 0xa0, asn_helper.ASN1_TYPE_INTEGER
+    componentType = NamedTypes(
+        NamedType(
+            'credType', Integer().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 0)
+            )
+        ),
+        NamedType(
+            'credentials', OctetString().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 1)
+            )
         )
-        self['credentials'] = asn_helper.ASN1Field(
-            'credentials', 0xa1, asn_helper.ASN1_TYPE_OCTET_STRING
-        )
+    )
 
 
-class TSPasswordCreds(asn_helper.ASN1Sequence):
+class TSPasswordCreds(Sequence):
     """
-    [MS-CSSP] v13.0 2016-07-14
+    [MS-CSSP] 2.2.1.2.1 TSPasswordCreds
+    https://msdn.microsoft.com/en-us/library/cc226783.aspx
+
+    Contains the user's password credentials that are delegated to the server.
 
     TSPasswordCreds ::= SEQUENCE {
         domainName  [0] OCTET STRING,
         userName    [1] OCTET STRING,
         password    [2] OCTET STRING
     }
-
-    The TSPasswordCreds structure contains the user's password credentials that
-    are delegated to the server.
-
-    Fields:
-        domainName: Contains the name of the user's account domain
-        userName: Contains the user's account name
-        password: Contains the user's account password
     """
-    def __init__(self):
-        self.name = 'TSPasswordCreds'
-        self.type = asn_helper.ASN1_TYPE_SEQUENCE
+    CRED_TYPE = 1  # 2.2.1.2 TSCredentials
 
-        self.fields = OrderedDict()
-        self['domain_name'] = asn_helper.ASN1Field(
-            'domainName', 0xa0, asn_helper.ASN1_TYPE_OCTET_STRING
-        )
-        self['user_name'] = asn_helper.ASN1Field(
-            'userName', 0xa1, asn_helper.ASN1_TYPE_OCTET_STRING
-        )
-        self['password'] = asn_helper.ASN1Field(
-            'password', 0xa2, asn_helper.ASN1_TYPE_OCTET_STRING
-        )
+    componentType = NamedTypes(
+        NamedType(
+            'domainName', OctetString().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 0)
+            )
+        ),
+        NamedType(
+            'userName', OctetString().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 1)
+            )
+        ),
+        NamedType(
+            'password', OctetString().subtype(
+                explicitTag=Tag(tagClassContext, tagFormatConstructed, 2)
+            )
+        ),
+    )
 
 
 """
@@ -218,14 +410,14 @@ TODO: Add support for TSSmartCardCreds and TSRemoteGuardCreds
 
 These are different delegation options that are supported by CredSSP
 
-TSSmartCardCreds ::= SEQUENCE {
+TSSmartCardCreds ::= SEQUENCE {  # CRED_TYPE = 2
     pin         [0] OCTET STRING,
     cspData     [1] TSCspDataDetail,
     userHint    [2] OCTET STRING OPTIONAL,
     domainHint  [3] OCTET STRING OPTIONAL
 }
 
-TSRemoteGuardCreds ::= SEQUENCE {
+TSRemoteGuardCreds ::= SEQUENCE {  # CRED_TYPE = 6
     logonCred           [0] TSRemoteGuardPackageCred,
     supplementalCreds   [1] SEQUENCE OF TSRemoteGuardPackageCred OPTIONAL
 }
