@@ -24,7 +24,7 @@ setup(
     ],
     extras_require={
         ':sys_platform=="win32"': [
-            'pywin32'
+            'pypyiwin32'
         ],
         # this is available by default on Windows based on the above extra
         'kerberos:sys_platform=="win32"': [],
