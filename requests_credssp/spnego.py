@@ -16,8 +16,7 @@ HAS_GSSAPI = True
 try:  # pragma: no cover
     import gssapi
     from gssapi.raw import acquire_cred_with_password  # needed for gssapi auth
-except ImportError as exc:
-    GSSAPI_IMPORT_ERROR = str(exc)
+except ImportError:
     HAS_GSSAPI = False
 
 HAS_SSPI = True
@@ -25,8 +24,7 @@ try:  # pragma: no cover
     import sspi
     import sspicon
     import win32security
-except ImportError as exc:
-    SSPI_IMPORT_ERROR = str(exc)
+except ImportError:
     HAS_SSPI = False
 
 log = logging.getLogger(__name__)

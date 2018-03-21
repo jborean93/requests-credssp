@@ -1,8 +1,17 @@
+import os
+
 import pytest
 
 from requests_credssp.exceptions import InvalidConfigurationException
 from requests_credssp.spnego import AuthContext, GSSAPIContext, NTLMContext, \
     SSPIContext, get_auth_context
+
+try:
+    import sspi
+    import sspicon
+    import win32security
+except ImportError:
+    pass
 
 
 class TestGetAuthContext(object):
@@ -37,6 +46,25 @@ class TestAuthContext(object):
 
 class TestSSPIContext(object):
 
+    @pytest.fixture(scope='class')
+    def sspi(self):
+        # these testa are run on localhost and require a valid Windows user
+        # set under CREDSSP_USERNAME and CREDSSP_PASSWORD
+        pytest.importorskip("sspi")
+
+        username = os.environ.get('CREDSSP_USERNAME', None)
+        password = os.environ.get('CREDSSP_PASSWORD', None)
+
+        if username and password:
+            server_context = sspi.ServerAuth(
+                pkg_name="Negotiate",
+            )
+            return server_context, "127.0.0.0", username, password
+        else:
+            pytest.skip("CREDSSP_USERNAME, CREDSSP_PASSWORD, CREDSSP_SERVER "
+                        "environment variables were not set, integration tests"
+                        " will be skipped")
+
     def test_basic_init(self):
         # this only tests the basic structure as the rest requires Windows
         actual = SSPIContext("hostname", "username", "password", "auto")
@@ -44,6 +72,36 @@ class TestSSPIContext(object):
         assert actual.username == "username"
         assert actual.auth_mech == "Negotiate"
         assert not actual.complete
+
+    def test_sspi_step(self, sspi):
+        # create instance of local SSPI Context and step through auth
+        client = SSPIContext(sspi[1], sspi[2], sspi[3], "auto")
+        client.init_context()
+        step_gen = client.step()
+        in_token = next(step_gen)
+        while not client.complete:
+            _, out_token = sspi[0].authorize(in_token)
+            out_token = out_token[0].Buffer
+            in_token = step_gen.send(out_token)
+
+        # verify the auth si successful
+        rc, out_token = sspi[0].authorize(in_token)
+        assert rc == 0  # SEC_E_COMPLETE
+
+        # verify we can wrap the client's requests
+        data = b"\x01\x02\x03\x04"
+        enc_data = client.wrap(data)
+        assert enc_data != data
+
+        dec_data = sspi[0].decrypt(enc_data[client._trailer_size:],
+                                   enc_data[:client._trailer_size])
+        assert dec_data == data
+
+        # now verify we can unwrap the server's responses
+        enc_data = sspi[0].encrypt(data)
+        enc_data = enc_data[1] + enc_data[0]
+        dec_data = client.unwrap(enc_data)
+        assert dec_data == data
 
 
 class TestGSSAPIContext(object):
