@@ -75,7 +75,7 @@ def get_auth_context(hostname, username, password, auth_mech):
     elif HAS_GSSAPI:
         log.info("GSSAPI is available, determine what mechanism to use as "
                  "auth backend")
-        mechs_available = GSSAPIContext.get_mechs_available(username)
+        mechs_available = GSSAPIContext.get_mechs_available()
         log.debug("GSSAPI mechs available: %s" % ", ".join(mechs_available))
 
         if auth_mech in mechs_available or auth_mech == "kerberos":
@@ -312,33 +312,18 @@ class GSSAPIContext(AuthContext):
             return self._context.complete
 
     def init_context(self):
-        log.debug("GSSAPI: Acquiring credentials handle for user %s with "
-                  "password" % self.username)
-
         if self.auth_mech != self._AUTH_MECHANISMS['kerberos']:
             name_type = gssapi.NameType.user
         else:
             name_type = gssapi.NameType.kerberos_principal
         mech = gssapi.OID.from_int_seq(self.auth_mech)
 
-        user = gssapi.Name(base=self.username,
-                           name_type=name_type)
-        server_name = gssapi.Name(self._target_spn,
-                                  name_type=gssapi.NameType.hostbased_service)
-
-        bpass = self.password.encode('utf-8')
-        cred = acquire_cred_with_password(user, bpass, usage='initiate',
-                                          mechs=mech)
-        log.info("GSSAPI: Acquired credentials for user %s" % str(user))
-        flags = gssapi.RequirementFlag.confidentiality | \
-            gssapi.RequirementFlag.mutual_authentication | \
-            gssapi.RequirementFlag.integrity | \
-            gssapi.RequirementFlag.out_of_sequence_detection
-        self._context = gssapi.SecurityContext(name=server_name,
-                                               creds=cred.creds,
-                                               usage='initiate',
-                                               mech=mech,
-                                               flags=flags)
+        log.debug("GSSAPI: Acquiring security context for user %s with mech %s"
+                  % (self.username, self.auth_mech))
+        self._context = self._get_security_context(name_type, mech,
+                                                   self._target_spn,
+                                                   self.username,
+                                                   self.password)
 
     def step(self):
         in_token = None
@@ -363,7 +348,7 @@ class GSSAPIContext(AuthContext):
         return self._context.unwrap(data)[0]
 
     @staticmethod
-    def get_mechs_available(username):
+    def get_mechs_available():
         """
         Checks if NTLM is available as an SSP. The Heimdal implementation of
         NTLM is subpar and does not work properly so we would ignore that.
@@ -380,24 +365,49 @@ class GSSAPIContext(AuthContext):
         except ImportError:
             return ['kerberos']
 
-        # now check if NTLM is available via gss-ntlmssp
-        user = gssapi.Name(base=username, name_type=gssapi.NameType.user)
+        # now check if NTLM is available via gss-ntlmssp, we try to get the
+        # first NTLM token with a fake user
         ntlm_oid = GSSAPIContext._AUTH_MECHANISMS['ntlm']
         ntlm_mech = gssapi.OID.from_int_seq(ntlm_oid)
 
-        # attempt to get the first NTLM token to verify it is installed
         try:
-            ntlm_context = gssapi.SecurityContext(
-                name=user,
-                usage='initiate',
-                mech=ntlm_mech
+            ntlm_context = GSSAPIContext._get_security_context(
+                gssapi.NameType.user,
+                ntlm_mech,
+                "http@server",
+                "username",
+                "password"
             )
             ntlm_context.step()
         except gssapi.exceptions.GSSError as exc:
             # failed to init NTLM, GSSAPI only supports Kerberos
+            log.debug("Failed to init test NTLM context with GSSAPI: %s"
+                      % str(exc))
             return ['kerberos']
         else:
             return ['auto', 'kerberos', 'ntlm']
+
+    @staticmethod
+    def _get_security_context(name_type, mech, spn, username, password):
+        user = gssapi.Name(base=username,
+                           name_type=name_type)
+        server_name = gssapi.Name(spn,
+                                  name_type=gssapi.NameType.hostbased_service)
+
+        b_password = password.encode('utf-8')
+        cred = acquire_cred_with_password(user, b_password, usage='initiate',
+                                          mechs=[mech])
+        flags = gssapi.RequirementFlag.confidentiality | \
+            gssapi.RequirementFlag.mutual_authentication | \
+            gssapi.RequirementFlag.integrity | \
+            gssapi.RequirementFlag.out_of_sequence_detection
+
+        context = gssapi.SecurityContext(name=server_name,
+                                         creds=cred.creds,
+                                         usage='initiate',
+                                         mech=mech,
+                                         flags=flags)
+        return context
 
 
 class NTLMContext(AuthContext):

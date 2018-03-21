@@ -23,6 +23,10 @@ setup(
         "requests>=2.0.0"
     ],
     extras_require={
+        ':sys_platform=="win32"': [
+            'pywin32'
+        ],
+        # this is available by default on Windows based on the above extra
         'kerberos:sys_platform=="win32"': [],
         'kerberos:sys_platform!="win32"': [
             'gssapi'
