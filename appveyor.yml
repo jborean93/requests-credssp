@@ -44,11 +44,13 @@ install:
     pip install -U pip setuptools
     pip install .
     pip install -r requirements-test.txt
+    
+    # test out pywin32 on some matrixes
+    if ($env:PYTHON -in @("Python27", "Python27-x64", "Python36", "Python36-x64")) {
+        pip install .[kerberos]
+    }
 
 build: off
 
 test_script:
 - ps: py.test -v --pep8 --cov requests_credssp --cov-report term-missing
-
-matrix:
-  fast_finish: true
