@@ -15,7 +15,8 @@ from requests_credssp.exceptions import AuthenticationException, \
 HAS_GSSAPI = True
 try:  # pragma: no cover
     import gssapi
-    from gssapi.raw import acquire_cred_with_password  # needed for gssapi auth
+    from gssapi.raw import acquire_cred_with_password
+    from gssapi.raw import set_sec_context_option
 except ImportError:
     HAS_GSSAPI = False
 
@@ -71,11 +72,16 @@ def get_auth_context(hostname, username, password, auth_mech):
         log.info("SSPI is available and will be used as auth backend")
         context = SSPIContext(hostname, username, password, auth_mech)
     elif HAS_GSSAPI:
-        log.info("GSSAPI is available, determine what mechanism to use as "
-                 "auth backend")
-        mechs_available = GSSAPIContext.get_mechs_available()
-        log.debug("GSSAPI mechs available: %s" % ", ".join(mechs_available))
+        mechs_available = ["kerberos"]
+        # to save on computing costs we only check the mechs that are available
+        # when auth_mech is auto or ntlm as it doesn't matter when kerberos
+        # is set (Kerberos is always available when python-gssapi is installed
+        if auth_mech != "kerberos":
+            log.info("GSSAPI is available, determine what mechanism to use as "
+                     "auth backend")
+            mechs_available = GSSAPIContext.get_mechs_available()
 
+        log.debug("GSSAPI mechs available: %s" % ", ".join(mechs_available))
         if auth_mech in mechs_available or auth_mech == "kerberos":
             log.info("GSSAPI with mech %s is being used as auth backend"
                      % auth_mech)
@@ -135,33 +141,75 @@ class AuthContext(with_metaclass(ABCMeta, object)):
     @property
     @abstractmethod
     def domain(self):
-        pass
+        """
+        The domain part of the username/domain combo. Each auth context
+        handles this differently but it is used later in the CredSSP process
+        when sending the encrypted credentials to the server.
+
+        :return: string - the domain part of the username/domain combo
+        """
+        pass  # pragma: no cover
 
     @property
     @abstractmethod
     def username(self):
-        pass
+        """
+        The username part of the username/domain combo. Each auth context
+        handles this differently but it is used later in the CredSSP
+        process when sending the encrypted credentials to the server.
+
+        :return: string - the username part of the username/domain combo
+        """
+        pass  # pragma: no cover
 
     @property
     @abstractmethod
     def complete(self):
-        pass
+        """
+        Whether the authentication phase between the client and server is
+        complete
+
+        :return: boolean - auth context is complete
+        """
+        pass  # pragma: no cover
 
     @abstractmethod
     def init_context(self):
-        pass
+        """
+        Sets up the initial authentication context to get it ready to step.
+        This must be called before step().
+        """
+        pass  # pragma: no cover
 
     @abstractmethod
     def step(self):
-        pass
+        """
+        Generator that yields each authentication token to send to the server,
+        it in turn takes in the response from the server and will continue
+        until the authentication is complete
+        """
+        pass  # pragma: no cover
 
     @abstractmethod
     def wrap(self, data):
-        pass
+        """
+        Used to wrap the data with the authentication context.
+
+        :param data: The byte string to wrap
+        :return: The byte string of the wrapped data
+        """
+        pass  # pragma: no cover
 
     @abstractmethod
     def unwrap(self, data):
-        pass
+        """
+        Used to unwrap a response from the server that has been wrapped with
+        the authentication context.
+
+        :param data: The byte string of the wrapped data
+        :return: The byte string of the unwrapped data
+        """
+        pass  # pragma: no cover
 
     @staticmethod
     def _get_domain_username(username):
@@ -348,27 +396,28 @@ class GSSAPIContext(AuthContext):
     @staticmethod
     def get_mechs_available():
         """
-        Checks if NTLM is available as an SSP. The Heimdal implementation of
-        NTLM is subpar and does not work properly so we would ignore that.
-        On other hosts we check if the GSS NTLMSSP provider is installed.
+        Returns a list of auth mechanisms that are available to the local
+        GSSAPI instance. Because we are interacting with Windows, we only
+        care if SPNEGO, Kerberos and NTLM are available where NTLM is the
+        only wildcard that may not be available by default.
+
+        The only NTLM implementation that works properly is gss-ntlmssp and
+        part of this test is to verify the gss-ntlmssp OID
+        GSS_NTLMSSP_RESET_CRYPTO_OID_LENGTH is implemented which is required
+        for SPNEGO and NTLM to work properly.
 
         :return: list - A list of supported mechs available in the installed
             version of GSSAPI
         """
-        # detect if GSSAPI has a Heimdal backend, Heimdal's implementation of
-        # NTLM doesn't mesh well with Windows so we just say it supports kerb
-        try:
-            # Heimdal does not implement these functions
-            from gssapi.raw import store_cred_into
-        except ImportError:
-            return ['kerberos']
-
-        # now check if NTLM is available via gss-ntlmssp, we try to get the
-        # first NTLM token with a fake user
         ntlm_oid = GSSAPIContext._AUTH_MECHANISMS['ntlm']
         ntlm_mech = gssapi.OID.from_int_seq(ntlm_oid)
+        # GSS_NTLMSSP_RESET_CRYPTO_OID_LENGTH
+        # github.com/simo5/gss-ntlmssp/blob/master/src/gssapi_ntlmssp.h#L68
+        reset_mech = gssapi.OID.from_int_seq("1.3.6.1.4.1.7165.655.1.3")
 
         try:
+            # we don't actually care about the account used here so just use
+            # a random username and password
             ntlm_context = GSSAPIContext._get_security_context(
                 gssapi.NameType.user,
                 ntlm_mech,
@@ -377,8 +426,13 @@ class GSSAPIContext(AuthContext):
                 "password"
             )
             ntlm_context.step()
+            set_sec_context_option(reset_mech, context=ntlm_context,
+                                   value=b"\x00" * 4)
         except gssapi.exceptions.GSSError as exc:
-            # failed to init NTLM, GSSAPI only supports Kerberos
+            # failed to init NTLM and verify gss-ntlmssp is available, this
+            # means NTLM is either not available or won't work
+            # (not gss-ntlmssp) so we return kerberos as the only available
+            # mechanism for the GSSAPI Context
             log.debug("Failed to init test NTLM context with GSSAPI: %s"
                       % str(exc))
             return ['kerberos']
@@ -392,16 +446,40 @@ class GSSAPIContext(AuthContext):
         server_name = gssapi.Name(spn,
                                   name_type=gssapi.NameType.hostbased_service)
 
-        b_password = password.encode('utf-8')
-        cred = acquire_cred_with_password(user, b_password, usage='initiate',
+        # acquire_cred_with_password is an expensive operation with Kerberos,
+        # we will first attempt to just retrieve from the local credential
+        # cache and if that fails we then acquire with the password. This is
+        # only relevant to the Kerberos mech as NTLM and SPNEGO require us to
+        # acquire with the password
+        acquire_with_pass = True
+        kerb_oid = GSSAPIContext._AUTH_MECHANISMS['kerberos']
+        kerb_mech = gssapi.OID.from_int_seq(kerb_oid)
+        if mech == kerb_mech:
+            try:
+                cred = gssapi.Credentials(name=user, usage='initiate',
                                           mechs=[mech])
+                # we successfully got the Kerberos credential from the cache
+                # and don't need to acquire with the password
+                acquire_with_pass = False
+            except gssapi.exceptions.GSSError:
+                pass
+
+        if acquire_with_pass:
+            # error when trying to access the existing cache, get our own
+            # credentials with the password specified
+            b_password = password.encode('utf-8')
+            cred = acquire_cred_with_password(user, b_password,
+                                              usage='initiate',
+                                              mechs=[mech])
+            cred = cred.creds
+
         flags = gssapi.RequirementFlag.confidentiality | \
             gssapi.RequirementFlag.mutual_authentication | \
             gssapi.RequirementFlag.integrity | \
             gssapi.RequirementFlag.out_of_sequence_detection
 
         context = gssapi.SecurityContext(name=server_name,
-                                         creds=cred.creds,
+                                         creds=cred,
                                          usage='initiate',
                                          mech=mech,
                                          flags=flags)

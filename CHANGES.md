@@ -6,7 +6,7 @@
 * Added support for new CredSSP protocol 5 and 6, mitigates CVE 2018-0886
 * Added the ability to specify a minimum CredSSP server version
 * Added support for SPNEGO/Kerberos authentication over CredSSP
-* Removed manual asn.1 structures and added dependency on pyasn1 to easier
+* Removed manual asn.1 structures and added dependency on pyasn1 for easier
   code management
 * Deprecated older function in HttpCredSSPAuth that should be host specific
   instead of global

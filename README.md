@@ -26,12 +26,13 @@ This library supports the following CredSSP features
 The following Python libraries are required;
 
 * Python 2.6, 2.7, 3.4+
+* [cryptography](https://github.com/pyca/cryptography)
 * [ntlm-auth](https://github.com/jborean93/ntlm-auth)
-* [pyasn1](https://github.com/etingof/pyasn1)
 * [six](https://pypi.python.org/pypi/six/)
+* [pyasn1>=0.3.1](https://github.com/etingof/pyasn1)
 * [pyOpenSSL>=16.0.0](https://github.com/pyca/pyopenssl)
 * [requests>=2.0.0](https://pypi.python.org/pypi/requests)
-* For Kerberos authentication on Unix [python-gssapi](https://github.com/pythongssapi/python-gssapi)
+* For Kerberos authentication on Unix [python-gssapi>=1.5.0](https://github.com/pythongssapi/python-gssapi)
 * For Kerberos authentication on Windows [pywin32](https://github.com/mhammond/pywin32)
 
 By default, this library can authenticate with a Windows host using NTLM

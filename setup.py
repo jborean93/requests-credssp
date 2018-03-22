@@ -16,9 +16,10 @@ setup(
     version='1.0.0',
     packages=['requests_credssp'],
     install_requires=[
+        "cryptography",
         "ntlm-auth",
-        "pyasn1",
         "six",
+        "pyasn1>=0.3.1",
         "pyOpenSSL>=16.0.0",
         "requests>=2.0.0"
     ],
@@ -27,7 +28,7 @@ setup(
             'pywin32'
         ],
         'kerberos:sys_platform!="win32"': [
-            'gssapi'
+            'gssapi>=1.5.0'
         ]
     },
     author='Jordan Borean',

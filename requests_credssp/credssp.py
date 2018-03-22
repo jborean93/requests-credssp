@@ -382,7 +382,7 @@ class HttpCredSSPAuth(AuthBase):
             to TLSv1.
         :param minimum_version: The minimum server version that can be
             authenticated against, set to 5 to ensure CVE 2018-0886 is always
-            mitigated and older can't be used.
+            mitigated and older hosts can't be used.
         """
         self.username = username
         self.password = password
