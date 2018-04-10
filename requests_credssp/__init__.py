@@ -1,18 +1,18 @@
+# Copyright: (c) 2018, Jordan Borean (@jborean93) <jborean93@gmail.com>
+# MIT License (see LICENSE or https://opensource.org/licenses/MIT)
+
 import logging
-import sys
 
-from .credssp import HttpCredSSPAuth
+from requests_credssp.credssp import HttpCredSSPAuth
 
-# python 2.7 introduced a NullHandler which we want to use, but to support
-# older versions, we implement our own if needed.
-if sys.version_info[:2] > (2, 6):
+try:
     from logging import NullHandler
-else:
-    from logging import Handler
-    class NullHandler(Handler):
+except ImportError:  # pragma: no cover
+    class NullHandler(logging.Handler):
         def emit(self, record):
             pass
 
-logging.getLogger(__name__).addHandler(NullHandler())
+logger = logging.getLogger(__name__)
+logger.addHandler(NullHandler())
 
-__all__ = ('HttpCredSSPAuth')
+__all__ = 'HttpCredSSPAuth'

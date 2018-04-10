@@ -1,10 +1,25 @@
 # Changes
 
+## 1.0.0 (TBD)
+
+* Drop support for Python 3.3
+* Added support for new CredSSP protocol 5 and 6, mitigates CVE 2018-0886
+* Added the ability to specify a minimum CredSSP server version
+* Added support for SPNEGO/Kerberos authentication over CredSSP
+* Removed manual asn.1 structures and added dependency on pyasn1 for easier
+  code management
+* Deprecated older function in HttpCredSSPAuth that should be host specific
+  instead of global
+* Changed license to MIT from ISC
+* Tidied up test suite to use py.test and added pep8 checks
+
+
 ## 0.1.0 (Jul 7, 2017)
 
 * Added support for using the TLS context to encrypt payload data
 * Tidied up the dependencies to set a minimum required version for pyOpenSSL and requests
 * Set ordereddict to only be a dependency for Python 2.6
+
 
 ## 0.0.2 (Mar 17, 2017)
 
