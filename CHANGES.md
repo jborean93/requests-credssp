@@ -1,6 +1,6 @@
 # Changes
 
-## 1.0.0 (TBD)
+## 1.0.0 (Apr 10, 2018)
 
 * Drop support for Python 3.3
 * Added support for new CredSSP protocol 5 and 6, mitigates CVE 2018-0886
