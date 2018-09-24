@@ -1,5 +1,11 @@
 # Changes
 
+## 1.0.1 (TBD)
+
+* Added support for Python 3.7
+* Fix version info warning msg for pub key authentication process
+
+
 ## 1.0.0 (Apr 10, 2018)
 
 * Drop support for Python 3.3
