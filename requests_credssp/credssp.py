@@ -138,7 +138,8 @@ class CredSSPContext(object):
             nonce = os.urandom(32)
         else:
             log.warning("Reported server version was %d, susceptible to MitM "
-                        "attacks and should be patched - CVE 2018-0886" % version)
+                        "attacks and should be patched - CVE 2018-0886"
+                        % version)
             nonce = None
 
         pub_key_auth = self._build_pub_key_auth(context, nonce,
