@@ -19,6 +19,8 @@ environment:
   - PYTHON: Python35-x64
   - PYTHON: Python36
   - PYTHON: Python36-x64
+  - PYTHON: Python37
+  - PYTHON: Python37-x64
 
 init:
 - ps: |
@@ -40,17 +42,20 @@ init:
     Set-Item -Path "WSMan:\localhost\Service\AllowUnencrypted" -Value $false
 
 install:
-- ps: |
-    pip install -U pip setuptools
-    pip install .
-    pip install -r requirements-test.txt
+- cmd: python -m pip install --upgrade pip
+- cmd: pip install --upgrade setuptools
+- cmd: pip install -r requirements-test.txt
+- cmd: pip install .
 
-    # test out pywin32 on some matrixes
+# test out pywin32 on some matrixes
+- ps: |
+    $ErrorActionPreference = "SilentlyContinue"
     if ($env:PYTHON -in @("Python27", "Python27-x64", "Python36", "Python36-x64")) {
         pip install .[kerberos]
     }
+    $ErrorActionPreference = "Stop"
 
 build: off
 
 test_script:
-- ps: py.test -v --pep8 --cov requests_credssp --cov-report term-missing
+- cmd: py.test -v --pep8 --cov requests_credssp --cov-report term-missing

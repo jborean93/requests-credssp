@@ -1,17 +1,25 @@
 language: python
 
 python:
-- "2.6"
-- "2.7"
-- "3.4"
-- "3.5"
-- "3.6"
+- 2.6
+- 2.7
+- 3.4
+- 3.5
+- 3.6
+
+# Python 3.7 requires 16.04 (Xenial), this is a hack to get that specific
+# distro running that version until I can swap the rest over officially
+matrix:
+  include:
+  - python: 3.7
+    dist: xenial
+    sudo: yes
 
 install:
-- pip install -U pip setuptools
-- pip install .
+- pip install --upgrade pip setuptools
 - pip install -r requirements-test.txt
-- pip install python-coveralls
+- pip install .
+- pip install coveralls
 
 script:
 - py.test -v --pep8 --cov requests_credssp --cov-report term-missing
