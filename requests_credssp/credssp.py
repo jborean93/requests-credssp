@@ -75,7 +75,7 @@ class CredSSPContext(object):
         successfully authenticate with the server and delegate the credentials.
         """
         log.info("Starting TLS handshake process")
-        self.tls_connection = SSL.Connection(self.tls_context, sock=None)
+        self.tls_connection = SSL.Connection(self.tls_context, socket=None)
         self.tls_connection.set_connect_state()
 
         while True:
