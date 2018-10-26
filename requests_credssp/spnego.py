@@ -77,8 +77,8 @@ def get_auth_context(hostname, username, password, auth_mech):
         # when auth_mech is auto or ntlm as it doesn't matter when kerberos
         # is set (Kerberos is always available when python-gssapi is installed
         if auth_mech != "kerberos":
-            log.debug("GSSAPI is available, determine what mechanism to use as "
-                      "auth backend")
+            log.debug("GSSAPI is available, determine what mechanism to use "
+                      "as auth backend")
             mechs_available = GSSAPIContext.get_mechs_available()
 
         log.debug("GSSAPI mechs available: %s" % ", ".join(mechs_available))
@@ -520,7 +520,7 @@ class NTLMContext(AuthContext):
 
         msg2 = yield msg1
         log.debug("NTLM: Parsing Challenge message: %s"
-                 % binascii.hexlify(msg2))
+                  % binascii.hexlify(msg2))
         msg2 = base64.b64encode(msg2)
         self._context.parse_challenge_message(msg2)
 

@@ -128,7 +128,7 @@ class CredSSPContext(object):
 
         version = min(version, TSRequest.CLIENT_VERSION)
         log.debug("Starting public key verification process at version %d"
-                 % version)
+                  % version)
         if version < self.minimum_version:
             raise AuthenticationException("The reported server version was %d "
                                           "and did not meet the minimum "
