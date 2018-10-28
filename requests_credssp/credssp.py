@@ -74,7 +74,7 @@ class CredSSPContext(object):
         server. CredSSP has multiple steps that must be run for the client to
         successfully authenticate with the server and delegate the credentials.
         """
-        log.info("Starting TLS handshake process")
+        log.debug("Starting TLS handshake process")
         self.tls_connection = SSL.Connection(self.tls_context)
         self.tls_connection.set_connect_state()
 
@@ -98,7 +98,7 @@ class CredSSPContext(object):
         server_certificate = self.tls_connection.get_peer_certificate()
         server_public_key = self._get_subject_public_key(server_certificate)
 
-        log.info("Starting Authentication process")
+        log.debug("Starting Authentication process")
         version = 6
         context, auth_step, out_token = get_auth_context(self.hostname,
                                                          self.username,
@@ -127,8 +127,8 @@ class CredSSPContext(object):
                 auth_step.send(bytes(ts_request['negoTokens'][0]['negoToken']))
 
         version = min(version, TSRequest.CLIENT_VERSION)
-        log.info("Starting public key verification process at version %d"
-                 % version)
+        log.debug("Starting public key verification process at version %d"
+                  % version)
         if version < self.minimum_version:
             raise AuthenticationException("The reported server version was %d "
                                           "and did not meet the minimum "
@@ -153,7 +153,7 @@ class CredSSPContext(object):
         log.debug("Step 3. Server Authentication, received token: %s"
                   % binascii.hexlify(in_token))
 
-        log.info("Starting server public key response verification")
+        log.debug("Starting server public key response verification")
         ts_request = decoder.decode(in_token, asn1Spec=TSRequest())[0]
         ts_request.check_error_code()
         if not ts_request['pubKeyAuth'].isValue:
@@ -167,7 +167,7 @@ class CredSSPContext(object):
         response_key = context.unwrap(bytes(ts_request['pubKeyAuth']))
         self._verify_public_keys(nonce, response_key, server_public_key)
 
-        log.info("Sending encrypted credentials")
+        log.debug("Sending encrypted credentials")
         enc_credentials = self._get_encrypted_credentials(context)
 
         yield self.wrap(enc_credentials), "Step 5. Delegate Credentials"

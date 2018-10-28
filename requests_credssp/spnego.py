@@ -69,7 +69,7 @@ def get_auth_context(hostname, username, password, auth_mech):
 
     if HAS_SSPI:
         # always use SSPI when it is available
-        log.info("SSPI is available and will be used as auth backend")
+        log.debug("SSPI is available and will be used as auth backend")
         context = SSPIContext(hostname, username, password, auth_mech)
     elif HAS_GSSAPI:
         mechs_available = ["kerberos"]
@@ -77,18 +77,18 @@ def get_auth_context(hostname, username, password, auth_mech):
         # when auth_mech is auto or ntlm as it doesn't matter when kerberos
         # is set (Kerberos is always available when python-gssapi is installed
         if auth_mech != "kerberos":
-            log.info("GSSAPI is available, determine what mechanism to use as "
-                     "auth backend")
+            log.debug("GSSAPI is available, determine what mechanism to use "
+                      "as auth backend")
             mechs_available = GSSAPIContext.get_mechs_available()
 
         log.debug("GSSAPI mechs available: %s" % ", ".join(mechs_available))
         if auth_mech in mechs_available or auth_mech == "kerberos":
-            log.info("GSSAPI with mech %s is being used as auth backend"
-                     % auth_mech)
+            log.debug("GSSAPI with mech %s is being used as auth backend"
+                      % auth_mech)
             context = GSSAPIContext(hostname, username, password, auth_mech)
         elif auth_mech == "ntlm":
-            log.info("GSSAPI is available but does not support NTLM, using "
-                     "ntlm-auth as auth backend instead")
+            log.debug("GSSAPI is available but does not support NTLM, using "
+                      "ntlm-auth as auth backend instead")
             context = NTLMContext(username, password)
         else:
             # make sure we can actually initialise a GSSAPI context in auto,
@@ -111,8 +111,8 @@ def get_auth_context(hostname, username, password, auth_mech):
                             "back to NTLM: %s" % str(err))
                 context = NTLMContext(username, password)
     else:
-        log.info("SSPI or GSSAPI is not available, using ntlm-auth as auth "
-                 "backend")
+        log.debug("SSPI or GSSAPI is not available, using ntlm-auth as auth "
+                  "backend")
         if auth_mech == "kerberos":
             raise InvalidConfigurationException("The auth_mechanism is set "
                                                 "to kerberos but SSPI or "
@@ -374,7 +374,7 @@ class GSSAPIContext(AuthContext):
     def step(self):
         in_token = None
         while not self.complete:
-            log.info("GSSAPI: Calling gss_init_sec_context()")
+            log.debug("GSSAPI: Calling gss_init_sec_context()")
             out_token = self._context.step(in_token)
 
             # When generating the last NTLM message, we need to override
@@ -519,12 +519,12 @@ class NTLMContext(AuthContext):
         log.debug("NTLM Negotiate message: %s" % binascii.hexlify(msg1))
 
         msg2 = yield msg1
-        log.info("NTLM: Parsing Challenge message: %s"
-                 % binascii.hexlify(msg2))
+        log.debug("NTLM: Parsing Challenge message: %s"
+                  % binascii.hexlify(msg2))
         msg2 = base64.b64encode(msg2)
         self._context.parse_challenge_message(msg2)
 
-        log.info("NTLM: Generating Authenticate message")
+        log.debug("NTLM: Generating Authenticate message")
         msg3 = self._context.create_authenticate_message(
             user_name=self.username,
             password=self.password,
