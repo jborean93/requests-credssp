@@ -1,5 +1,9 @@
 # Changes
 
+## 1.0.2 (Nov 14, 2018)
+
+* Changed some log messages to a debug level instead of info
+
 ## 1.0.1 (Sep 25, 2018)
 
 * Added support for Python 3.7

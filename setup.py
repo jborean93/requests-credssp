@@ -13,7 +13,7 @@ except ImportError:
 
 setup(
     name='requests-credssp',
-    version='1.0.1',
+    version='1.0.2',
     packages=['requests_credssp'],
     install_requires=[
         "cryptography",
