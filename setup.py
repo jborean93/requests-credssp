@@ -13,11 +13,11 @@ except ImportError:
 
 setup(
     name='requests-credssp',
-    version='1.0.2',
+    version='1.1.0',
     packages=['requests_credssp'],
     install_requires=[
         "cryptography",
-        "ntlm-auth",
+        "ntlm-auth>=1.2.0",
         "six",
         "pyasn1>=0.3.1",
         "pyOpenSSL>=16.0.0",

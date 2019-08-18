@@ -1,8 +1,17 @@
 # Changes
 
+## 1.1.0 (Aug 19, 2019)
+
+* Bumped `ntlm-auth` minimum version to `v1.2.0`
+* Use new NTLM context object to avoid having to base64 encode/decode the messages
+* Fix invalid regex escape sequences that have been deprecated in Python 3.8
+* Include `LICENSE` and `CHANGES.md` in the Python package manifest
+
+
 ## 1.0.2 (Nov 14, 2018)
 
 * Changed some log messages to a debug level instead of info
+
 
 ## 1.0.1 (Sep 25, 2018)
 

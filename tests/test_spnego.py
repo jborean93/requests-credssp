@@ -175,18 +175,3 @@ class TestNTLMContext(object):
         # 0-4 is NTLM sig == 01 00 00 00 , 12:16 is the sequence number
         assert enc_msg[:4] == b"\x01\x00\x00\x00"
         assert enc_msg[12:16] == b"\x00\x00\x00\x00"
-
-    def test_ntlm_unwrap(self):
-        class SessionSecurityMock(object):
-            def unwrap(self, data1, data2):
-                # asserts NTLMContext actually splits the sig and data and
-                # sends them to ntlm-auth correctly
-                assert data1 == b"\xbb" * 16
-                assert data2 == b"\xaa" * 16
-
-        ntlm = NTLMContext("", "")
-        ntlm.init_context()
-        ntlm._context.session_security = SessionSecurityMock()
-
-        data = (b"\xaa" * 16) + (b"\xbb" * 16)
-        ntlm.unwrap(data)

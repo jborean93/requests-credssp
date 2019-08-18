@@ -457,7 +457,7 @@ class HttpCredSSPAuth(AuthBase):
         self.contexts[host] = context
 
         credssp_gen = context.credssp_generator()
-        credssp_regex = re.compile("CredSSP ([^,\s]*)$", re.I)
+        credssp_regex = re.compile(r"CredSSP ([^,\s]*)$", re.I)
 
         # loop through the CredSSP generator to exchange the tokens between the
         # client and the server until either an error occurs or we reached the

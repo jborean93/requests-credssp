@@ -697,7 +697,7 @@ class TestHttpCredSSPAuth(object):
         assert actual == expected
 
     def test_get_credssp_token(self):
-        pattern = re.compile("CredSSP ([^,\s]*)$", re.I)
+        pattern = re.compile(r"CredSSP ([^,\s]*)$", re.I)
         response = requests.Response()
         response.headers['www-authenticate'] = "CredSSP YWJj"
         expected = b"abc"
@@ -706,7 +706,7 @@ class TestHttpCredSSPAuth(object):
         assert actual == expected
 
     def test_get_credssp_token_fail_no_header(self):
-        pattern = re.compile("CredSSP ([^,\s]*)$", re.I)
+        pattern = re.compile(r"CredSSP ([^,\s]*)$", re.I)
         response = requests.Response()
         with pytest.raises(AuthenticationException) as exc:
             HttpCredSSPAuth._get_credssp_token(response, pattern, "step 1")
@@ -714,7 +714,7 @@ class TestHttpCredSSPAuth(object):
                                  "token after step step 1 - actual ''"
 
     def test_get_credssp_token_fail_no_credssp_token(self):
-        pattern = re.compile("CredSSP ([^,\s]*)$", re.I)
+        pattern = re.compile(r"CredSSP ([^,\s]*)$", re.I)
         response = requests.Response()
         response.headers['www-authenticate'] = "NTLM YWJj"
         with pytest.raises(AuthenticationException) as exc:
@@ -967,7 +967,7 @@ class TestHttpCredSSPAuthFunctional(object):
         # SecPkgContext_StreamSizes but there is no GSSAPI/OpenSSL equivalent
         # so we need to calculate it ourselves
 
-        if re.match('^.*-GCM-[\w\d]*$', cipher_suite):
+        if re.match(r'^.*-GCM-[\w\d]*$', cipher_suite):
             # We are using GCM for the cipher suite, GCM has a fixed length of
             # 16 bytes for the TLS trailer making it easy for us
             trailer_length = 16

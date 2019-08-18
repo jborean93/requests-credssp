@@ -1,12 +1,11 @@
 # Copyright: (c) 2018, Jordan Borean (@jborean93) <jborean93@gmail.com>
 # MIT License (see LICENSE or https://opensource.org/licenses/MIT)
 
-import base64
 import binascii
 import logging
 
 from abc import ABCMeta, abstractmethod
-from ntlm_auth.ntlm import Ntlm
+from ntlm_auth.ntlm import NtlmContext
 from six import with_metaclass
 
 from requests_credssp.exceptions import AuthenticationException, \
@@ -496,7 +495,6 @@ class NTLMContext(AuthContext):
     def __init__(self, username, password):
         super(NTLMContext, self).__init__(password, "ntlm")
         self._domain, self._username = self._get_domain_username(username)
-        self._complete = False
 
     @property
     def domain(self):
@@ -508,34 +506,25 @@ class NTLMContext(AuthContext):
 
     @property
     def complete(self):
-        return self._complete
+        return self._context.complete
 
     def init_context(self):
-        self._context = Ntlm()
+        self._context = NtlmContext(self.username, self.password, self.domain)
 
     def step(self):
-        msg1 = self._context.create_negotiate_message(self.domain)
-        msg1 = base64.b64decode(msg1)
+        msg1 = self._context.step()
         log.debug("NTLM Negotiate message: %s" % binascii.hexlify(msg1))
 
         msg2 = yield msg1
-        log.debug("NTLM: Parsing Challenge message: %s"
-                  % binascii.hexlify(msg2))
-        msg2 = base64.b64encode(msg2)
-        self._context.parse_challenge_message(msg2)
+        log.debug("NTLM: Parsing Challenge message and generating Authenticate"
+                  " message: %s" % binascii.hexlify(msg2))
+        msg3 = self._context.step(msg2)
 
-        log.debug("NTLM: Generating Authenticate message")
-        msg3 = self._context.create_authenticate_message(
-            user_name=self.username,
-            password=self.password,
-            domain_name=self.domain
-        )
-        self._complete = True
-        yield base64.b64decode(msg3)
+        yield msg3
 
     def wrap(self, data):
-        enc_data, enc_signature = self._context.session_security.wrap(data)
-        return enc_signature + enc_data
+        wrapped_data = self._context.wrap(data)
+        return wrapped_data[:16] + wrapped_data[16:]
 
     def unwrap(self, data):
-        return self._context.session_security.unwrap(data[16:], data[:16])
+        return self._context.unwrap(data)
