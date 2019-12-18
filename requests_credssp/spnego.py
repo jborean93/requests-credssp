@@ -383,8 +383,9 @@ class GSSAPIContext(AuthContext):
 
             in_token = yield out_token
 
-        # one final step for the mechListMIC when using NTLM
-        self._context.step(in_token)
+        # one final step for the mechListMIC when using NTLM, we yield so the
+        # caller doesn't have to catch a StopIteration error.
+        yield self._context.step(in_token)
 
     def wrap(self, data):
         return self._context.wrap(data, True)[0]

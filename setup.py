@@ -13,7 +13,7 @@ except ImportError:
 
 setup(
     name='requests-credssp',
-    version='1.1.0',
+    version='1.1.1',
     packages=['requests_credssp'],
     install_requires=[
         "cryptography",
@@ -31,6 +31,7 @@ setup(
             'gssapi>=1.5.0'
         ]
     },
+    python_requires='>=2.6,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*',
     author='Jordan Borean',
     author_email='jborean93@gmail.com',
     url='https://github.com/jborean93/requests-credssp',
@@ -49,5 +50,6 @@ setup(
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
     ],
 )
