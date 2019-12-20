@@ -1,11 +1,11 @@
-# Changes
+# Changelog
 
-## 1.1.1 (Dev 20, 2019)
+## 1.1.1 - 2019-12-20
 
 * Fixed `StopIterator` error when `gssapi`, `gss-ntlmssp` is installed and NTLM auth was negotiated with SPNEGO.
 
 
-## 1.1.0 (Aug 19, 2019)
+## 1.1.0 - 2019-08-19
 
 * Bumped `ntlm-auth` minimum version to `v1.2.0`
 * Use new NTLM context object to avoid having to base64 encode/decode the messages
@@ -13,18 +13,18 @@
 * Include `LICENSE` and `CHANGES.md` in the Python package manifest
 
 
-## 1.0.2 (Nov 14, 2018)
+## 1.0.2 - 2018-11-14
 
 * Changed some log messages to a debug level instead of info
 
 
-## 1.0.1 (Sep 25, 2018)
+## 1.0.1 - 2018-09-25
 
 * Added support for Python 3.7
 * Fix version info warning msg for pub key authentication process
 
 
-## 1.0.0 (Apr 10, 2018)
+## 1.0.0 - 2018-04-10
 
 * Drop support for Python 3.3
 * Added support for new CredSSP protocol 5 and 6, mitigates CVE 2018-0886
@@ -38,19 +38,19 @@
 * Tidied up test suite to use py.test and added pep8 checks
 
 
-## 0.1.0 (Jul 7, 2017)
+## 0.1.0 - 2017-07-07
 
 * Added support for using the TLS context to encrypt payload data
 * Tidied up the dependencies to set a minimum required version for pyOpenSSL and requests
 * Set ordereddict to only be a dependency for Python 2.6
 
 
-## 0.0.2 (Mar 17, 2017)
+## 0.0.2 - 2017-03-17
 
 * Small fix for older version of pyOpenSSL don't fail when this library is loaded
 
 
-## 0.0.1 (Aug 29, 2016)
+## 0.0.1 - 2016-08-29
 
 Initial Commit, supports
 
