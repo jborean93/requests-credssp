@@ -1,6 +1,6 @@
 # Changes
 
-## 1.1.1 (TBD)
+## 1.1.1 (Dev 20, 2019)
 
 * Fixed `StopIterator` error when `gssapi`, `gss-ntlmssp` is installed and NTLM auth was negotiated with SPNEGO.
 
