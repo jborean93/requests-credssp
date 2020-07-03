@@ -28,13 +28,12 @@ The following Python libraries are required;
 
 * Python 2.7, 3.5+
 * [cryptography](https://github.com/pyca/cryptography)
-* [ntlm-auth](https://github.com/jborean93/ntlm-auth)
 * [six](https://pypi.python.org/pypi/six/)
 * [pyasn1>=0.3.1](https://github.com/etingof/pyasn1)
 * [pyOpenSSL>=16.0.0](https://github.com/pyca/pyopenssl)
+* [pyspnego](https://github.com/jborean93/pyspnego)
 * [requests>=2.0.0](https://pypi.python.org/pypi/requests)
 * For Kerberos authentication on Unix [python-gssapi>=1.5.0](https://github.com/pythongssapi/python-gssapi)
-* For Kerberos authentication on Windows [pywin32](https://github.com/mhammond/pywin32)
 
 By default, this library can authenticate with a Windows host using NTLM
 messages, if Kerberos authentication is desired, please read the below.
@@ -51,18 +50,8 @@ pip install requests-credssp
 pip install requests-credssp[kerberos]
 ```
 
-### Kerberos on Windows
 
-To add support for Kerberos authentication on a Windows host, the `pywin32`
-Python library needs to be installed. According to their readme you can install
-this with their binaries, otherwise it can installed through pip with
-
-```
-# installing pywin32 through pip is marked as experimental
-pip install requests-credssp[kerberos]
-```
-
-### Kerberos on Non-Windows
+### Kerberos on Linux
 
 To add support for Kerberos authentication on a non-Windows host, the Kerberos
 system headers must be installed and the `python-gssapi` library installed. To

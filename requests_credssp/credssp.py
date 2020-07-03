@@ -7,6 +7,7 @@ import hashlib
 import logging
 import os
 import re
+import spnego
 import struct
 import warnings
 
@@ -17,8 +18,7 @@ from requests.auth import AuthBase
 
 from requests_credssp.asn_structures import NegoToken, TSCredentials, \
     TSPasswordCreds, TSRequest
-from requests_credssp.exceptions import AuthenticationException
-from requests_credssp.spnego import get_auth_context
+from requests_credssp.exceptions import AuthenticationException, InvalidConfigurationException
 
 try:
     from urlparse import urlparse
@@ -36,6 +36,12 @@ class CredSSPContext(object):
         self.hostname = hostname
         self.username = username
         self.password = password
+
+        if auth_mechanism == 'auto':
+            auth_mechanism = 'negotiate'
+        elif auth_mechanism not in ['ntlm', 'kerberos']:
+            raise InvalidConfigurationException("Invalid auth_mechanism supplied %s, must be auto, ntlm, or kerberos"
+                                                % auth_mechanism)
         self.auth_mechanism = auth_mechanism
         self.minimum_version = minimum_version
 
@@ -83,88 +89,77 @@ class CredSSPContext(object):
                 self.tls_connection.do_handshake()
             except SSL.WantReadError:
                 out_token = self.tls_connection.bio_read(self.BIO_BUFFER_SIZE)
-                log.debug("Step 1. TLS Handshake, returning token: %s"
-                          % binascii.hexlify(out_token))
+
+                log.debug("Step 1. TLS Handshake, returning token: %s" % binascii.hexlify(out_token))
                 in_token = yield out_token, "Step 1. TLS Handshake"
-                log.debug("Step 1. TLS Handshake, received token: %s"
-                          % binascii.hexlify(in_token))
+                log.debug("Step 1. TLS Handshake, received token: %s" % binascii.hexlify(in_token))
+
                 self.tls_connection.bio_write(in_token)
             else:
                 break
         log.debug("TLS Handshake complete. Protocol: %s, Cipher: %s"
-                  % (self.tls_connection.get_protocol_version_name(),
-                     self.tls_connection.get_cipher_name()))
+                  % (self.tls_connection.get_protocol_version_name(), self.tls_connection.get_cipher_name()))
 
         server_certificate = self.tls_connection.get_peer_certificate()
         server_public_key = self._get_subject_public_key(server_certificate)
 
         log.debug("Starting Authentication process")
-        version = 6
-        context, auth_step, out_token = get_auth_context(self.hostname,
-                                                         self.username,
-                                                         self.password,
-                                                         self.auth_mechanism)
-        while not context.complete:
+        context = spnego.client(self.username, self.password, hostname=self.hostname, service='HTTP',
+                                protocol=self.auth_mechanism)
+
+        out_token = context.step()
+        while True:
             nego_token = NegoToken()
             nego_token['negoToken'] = out_token
 
             ts_request = TSRequest()
             ts_request['negoTokens'].append(nego_token)
-
             ts_request_token = encoder.encode(ts_request)
-            log.debug("Step 2. Authenticate, returning token: %s"
-                      % binascii.hexlify(ts_request_token))
-            in_token = yield self.wrap(ts_request_token), \
-                "Step 2. Authenticate"
+
+            log.debug("Step 2. Authenticate, returning token: %s" % binascii.hexlify(ts_request_token))
+            in_token = yield self.wrap(ts_request_token), "Step 2. Authenticate"
             in_token = self.unwrap(in_token)
-            log.debug("Step 3. Authenticate, received token: %s"
-                      % binascii.hexlify(in_token))
+            log.debug("Step 3. Authenticate, received token: %s" % binascii.hexlify(in_token))
 
             ts_request = decoder.decode(in_token, asn1Spec=TSRequest())[0]
             ts_request.check_error_code()
             version = int(ts_request['version'])
-            out_token = \
-                auth_step.send(bytes(ts_request['negoTokens'][0]['negoToken']))
+            out_token = context.step(bytes(ts_request['negoTokens'][0]['negoToken']))
+
+            # Special edge case, we need to include the final NTLM token in the pubKeyAuth step but the context won't
+            # be seen as complete at that stage so check if the known header is present.
+            if context.complete or b"NTLMSSP\x00\x03\x00\x00\x00" in out_token:
+                break
 
         version = min(version, TSRequest.CLIENT_VERSION)
-        log.debug("Starting public key verification process at version %d"
-                  % version)
+        log.debug("Starting public key verification process at version %d" % version)
         if version < self.minimum_version:
-            raise AuthenticationException("The reported server version was %d "
-                                          "and did not meet the minimum "
-                                          "requirements of %d"
-                                          % (version, self.minimum_version))
+            raise AuthenticationException("The reported server version was %d and did not meet the minimum "
+                                          "requirements of %d" % (version, self.minimum_version))
         if version > 4:
             nonce = os.urandom(32)
         else:
-            log.warning("Reported server version was %d, susceptible to MitM "
-                        "attacks and should be patched - CVE 2018-0886"
-                        % version)
+            log.warning("Reported server version was %d, susceptible to MitM attacks and should be patched - "
+                        "CVE 2018-0886" % version)
             nonce = None
 
-        pub_key_auth = self._build_pub_key_auth(context, nonce,
-                                                out_token,
-                                                server_public_key)
-        log.debug("Step 3. Server Authentication, returning token: %s"
-                  % binascii.hexlify(pub_key_auth))
-        in_token = yield (self.wrap(pub_key_auth),
-                          "Step 3. Server Authentication")
+        pub_key_auth = self._build_pub_key_auth(context, nonce, out_token, server_public_key)
+        log.debug("Step 3. Server Authentication, returning token: %s" % binascii.hexlify(pub_key_auth))
+        in_token = yield self.wrap(pub_key_auth), "Step 3. Server Authentication"
         in_token = self.unwrap(in_token)
-        log.debug("Step 3. Server Authentication, received token: %s"
-                  % binascii.hexlify(in_token))
+        log.debug("Step 3. Server Authentication, received token: %s" % binascii.hexlify(in_token))
 
         log.debug("Starting server public key response verification")
         ts_request = decoder.decode(in_token, asn1Spec=TSRequest())[0]
         ts_request.check_error_code()
         if not ts_request['pubKeyAuth'].isValue:
-            raise AuthenticationException("The server did not response with "
-                                          "pubKeyAuth info, authentication "
-                                          "was rejected")
+            raise AuthenticationException("The server did not response with pubKeyAuth info, authentication was "
+                                          "rejected")
         if len(ts_request['negoTokens']) > 0:
             # SPNEGO auth returned the mechListMIC for us to verify
-            auth_step.send(bytes(ts_request['negoTokens'][0]['negoToken']))
+            context.step(bytes(ts_request['negoTokens'][0]['negoToken']))
 
-        response_key = context.unwrap(bytes(ts_request['pubKeyAuth']))
+        response_key = context.unwrap(bytes(ts_request['pubKeyAuth'])).data
         self._verify_public_keys(nonce, response_key, server_public_key)
 
         log.debug("Sending encrypted credentials")
@@ -209,13 +204,12 @@ class CredSSPContext(object):
 
         if nonce is not None:
             ts_request['clientNonce'] = nonce
-            hash_input = b"CredSSP Client-To-Server Binding Hash\x00" + \
-                         nonce + public_key
+            hash_input = b"CredSSP Client-To-Server Binding Hash\x00" + nonce + public_key
             pub_value = hashlib.sha256(hash_input).digest()
         else:
             pub_value = public_key
 
-        enc_public_key = context.wrap(pub_value)
+        enc_public_key = context.wrap(pub_value).data
         ts_request['pubKeyAuth'] = enc_public_key
 
         return encoder.encode(ts_request)
@@ -248,8 +242,7 @@ class CredSSPContext(object):
         :param public_key: The actual public key of the server
         """
         if nonce is not None:
-            hash_input = b"CredSSP Server-To-Client Binding Hash\x00" + nonce \
-                         + public_key
+            hash_input = b"CredSSP Server-To-Client Binding Hash\x00" + nonce + public_key
             actual = hashlib.sha256(hash_input).digest()
             expected = server_key
         else:
@@ -260,9 +253,8 @@ class CredSSPContext(object):
             expected = public_key
 
         if actual != expected:
-            raise AuthenticationException("Could not verify key sent from the "
-                                          "server, potential man in the "
-                                          "middle attack")
+            raise AuthenticationException("Could not verify key sent from the server, potential man in the middle "
+                                          "attack")
 
     def _get_encrypted_credentials(self, context):
         """
@@ -278,9 +270,15 @@ class CredSSPContext(object):
         :param context: The authenticated security context
         :return: The encrypted TSRequest that contains the user's credentials
         """
+        domain = u""
+        if "\\" in context.username:
+            domain, username = context.username.split('\\', 1)
+        else:
+            username = context.username
+
         ts_password = TSPasswordCreds()
-        ts_password['domainName'] = context.domain.encode('utf-16-le')
-        ts_password['userName'] = context.username.encode('utf-16-le')
+        ts_password['domainName'] = domain.encode('utf-16-le')
+        ts_password['userName'] = username.encode('utf-16-le')
         ts_password['password'] = context.password.encode('utf-16-le')
 
         ts_credentials = TSCredentials()
@@ -288,7 +286,7 @@ class CredSSPContext(object):
         ts_credentials['credentials'] = encoder.encode(ts_password)
 
         ts_request = TSRequest()
-        enc_credentials = context.wrap(encoder.encode(ts_credentials))
+        enc_credentials = context.wrap(encoder.encode(ts_credentials)).data
         ts_request['authInfo'] = enc_credentials
 
         return encoder.encode(ts_request)
@@ -308,8 +306,7 @@ class CredSSPContext(object):
 
         while True:
             try:
-                encrypted_chunk = \
-                    self.tls_connection.bio_read(self.BIO_BUFFER_SIZE)
+                encrypted_chunk = self.tls_connection.bio_read(self.BIO_BUFFER_SIZE)
             except SSL.WantReadError:
                 break
             encrypted_data += encrypted_chunk
@@ -360,8 +357,7 @@ class CredSSPContext(object):
         """
         public_key = cert.get_pubkey()
         cryptographic_key = public_key.to_cryptography_key()
-        subject_public_key = cryptographic_key.public_bytes(Encoding.DER,
-                                                            PublicFormat.PKCS1)
+        subject_public_key = cryptographic_key.public_bytes(Encoding.DER, PublicFormat.PKCS1)
         return subject_public_key
 
 
@@ -451,8 +447,7 @@ class HttpCredSSPAuth(AuthBase):
 
     def handle_401(self, response, **kwargs):
         host = urlparse(response.url).hostname
-        context = CredSSPContext(host, self.username, self.password,
-                                 self.auth_mechanism, self.disable_tlsv1_2,
+        context = CredSSPContext(host, self.username, self.password, self.auth_mechanism, self.disable_tlsv1_2,
                                  self.minimum_version)
         self.contexts[host] = context
 
@@ -480,8 +475,7 @@ class HttpCredSSPAuth(AuthBase):
                     break
 
                 # attempt to retrieve the CredSSP token response
-                in_token = self._get_credssp_token(response, credssp_regex,
-                                                   step_name)
+                in_token = self._get_credssp_token(response, credssp_regex, step_name)
 
                 # send the input CredSSP token and get the next output token
                 out_token, step_name = credssp_gen.send(in_token)
@@ -494,8 +488,7 @@ class HttpCredSSPAuth(AuthBase):
     def _check_credssp_supported(response):
         auth_supported = response.headers.get('www-authenticate', '')
         if 'CREDSSP' not in auth_supported.upper():
-            error_msg = "The server did not response CredSSP being an " \
-                        "available authentication method - actual: '%s'" \
+            error_msg = "The server did not response CredSSP being an available authentication method - actual: '%s'" \
                         % auth_supported
             raise AuthenticationException(error_msg)
 
@@ -511,8 +504,7 @@ class HttpCredSSPAuth(AuthBase):
         token_match = pattern.search(auth_header)
 
         if not token_match:
-            error_msg = "Server did not response with a CredSSP " \
-                        "token after step %s - actual '%s'" \
+            error_msg = "Server did not response with a CredSSP token after step %s - actual '%s'" \
                         % (step_name, auth_header)
             raise AuthenticationException(error_msg)
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 - TBD
+
+* Changed authentication library from `ntlm-auth`, `gssapi`, or `pywin32` to `pyspnego`.
+* Dropped support for Python 2.6 and Python 3.4
+
+
 ## 1.1.1 - 2019-12-20
 
 * Fixed `StopIterator` error when `gssapi`, `gss-ntlmssp` is installed and NTLM auth was negotiated with SPNEGO.
