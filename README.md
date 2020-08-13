@@ -1,8 +1,9 @@
 # requests-credssp
 
-[![Build Status](https://travis-ci.org/jborean93/requests-credssp.svg?branch=master)](https://travis-ci.org/jborean93/requests-credssp)
-[![Appveyor Build status](https://ci.appveyor.com/api/projects/status/6osajucq8sf8aeed?svg=true)](https://ci.appveyor.com/project/jborean93/requests-credssp)
-[![Coverage Status](https://coveralls.io/repos/github/jborean93/requests-credssp/badge.svg)](https://coveralls.io/github/jborean93/requests-credssp)
+[![Build Status](https://dev.azure.com/jborean93/jborean93/_apis/build/status/jborean93.requests-credssp?branchName=master)](https://dev.azure.com/jborean93/jborean93/_build/latest?definitionId=5&branchName=master)
+[![codecov](https://codecov.io/gh/jborean93/requests-credssp/branch/master/graph/badge.svg)](https://codecov.io/gh/jborean93/requests-credssp)
+[![PyPI version](https://badge.fury.io/py/requests-credssp.svg)](https://badge.fury.io/py/requests-credssp)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/jborean93/request-credssp/blob/master/LICENSE)
 
 
 ## About this library
@@ -25,7 +26,7 @@ This library supports the following CredSSP features
 
 The following Python libraries are required;
 
-* Python 2.6, 2.7, 3.4+
+* Python 2.7, 3.5+
 * [cryptography](https://github.com/pyca/cryptography)
 * [ntlm-auth](https://github.com/jborean93/ntlm-auth)
 * [six](https://pypi.python.org/pypi/six/)
