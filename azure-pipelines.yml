@@ -2,7 +2,6 @@ trigger:
   branches:
     include:
     - master
-    - azure-pipelines
   tags:
     include:
     - v*
@@ -131,7 +130,7 @@ stages:
         Write-Host 'Enabling WinRM and CredSSP'
         Enable-PSRemoting -Force
         $null = Enable-WSManCredSSP -Role Server -Force
-        Set-Item -Path "WSMan:\localhost\Service\Auth\CredSSP" -Value $true
+        Set-Item -Path WSMan:\localhost\Service\Auth\CredSSP -Value $true
 
         Write-Host 'Recreating WSMan listeners'
         Remove-Item -Path WSMan:\localhost\Listener\* -Recurse -Force
