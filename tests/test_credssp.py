@@ -1,3 +1,4 @@
+import collections
 import os
 import re
 import requests
@@ -9,11 +10,18 @@ import pytest
 from xml.etree import ElementTree as ET
 
 from requests_credssp.credssp import CredSSPContext, HttpCredSSPAuth
-from requests_credssp.exceptions import AuthenticationException, \
-    NTStatusException
+from requests_credssp.exceptions import AuthenticationException, InvalidConfigurationException, NTStatusException
+
+
+WrapResult = collections.namedtuple('WrapResult', ['data'])
 
 
 class TestCredSSPContext(object):
+
+    def test_invalid_auth_mechanism(self):
+        with pytest.raises(InvalidConfigurationException):
+            CredSSPContext("", "", "", auth_mechanism="Invalid auth_mechanism supplied fake, must be auto, ntlm, or "
+                                                      "kerberos")
 
     def test_tls_default(self, monkeypatch):
         class SSLContextMock(object):
@@ -61,7 +69,7 @@ class TestCredSSPContext(object):
         class FakeContext(object):
             def wrap(self, data):
                 # just pads an extra 4 null chars to verify wrap was called
-                return data + (b"\x00" * 4)
+                return WrapResult(data + (b"\x00" * 4))
 
         context = FakeContext()
         credssp = CredSSPContext("", "", "")
@@ -151,7 +159,7 @@ class TestCredSSPContext(object):
         class FakeContext(object):
             def wrap(self, data):
                 # just pads an extra 4 null chars to verify wrap was called
-                return data + (b"\x00" * 4)
+                return WrapResult(data + (b"\x00" * 4))
 
         context = FakeContext()
         credssp = CredSSPContext("", "", "")
@@ -247,7 +255,7 @@ class TestCredSSPContext(object):
         class FakeContext(object):
             def wrap(self, data):
                 # just pads an extra 4 null chars to verify wrap was called
-                return data + (b"\x00" * 4)
+                return WrapResult(data + (b"\x00" * 4))
 
         context = FakeContext()
         credssp = CredSSPContext("", "", "")
@@ -313,7 +321,7 @@ class TestCredSSPContext(object):
         class FakeContext(object):
             def wrap(self, data):
                 # just pads an extra 4 null chars to verify wrap was called
-                return data + (b"\x00" * 4)
+                return WrapResult(data + (b"\x00" * 4))
 
         context = FakeContext()
         credssp = CredSSPContext("", "", "")
@@ -628,12 +636,11 @@ class TestCredSSPContext(object):
     def test_get_encrypted_credentials(self):
         class FakeContext(object):
             def __init__(self):
-                self.domain = "domain"
-                self.username = "username"
+                self.username = "domain\\username"
                 self.password = "password"
 
             def wrap(self, data):
-                return data + (b"\x00" * 4)
+                return WrapResult(data + (b"\x00" * 4))
 
         context = FakeContext()
         credssp = CredSSPContext("", "", "")
