@@ -18,7 +18,7 @@ with open(abs_path('README.md'), mode='rb') as fd:
 
 setup(
     name='requests-credssp',
-    version='1.2.0rc1',
+    version='1.2.0',
     packages=['requests_credssp'],
     install_requires=[
         "cryptography",

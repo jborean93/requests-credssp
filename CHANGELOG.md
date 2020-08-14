@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0 - TBD
+## 1.2.0 - 2020-08-14
 
 * Changed authentication library from `ntlm-auth`, `gssapi`, or `pywin32` to `pyspnego`.
 * Dropped support for Python 2.6 and Python 3.4
