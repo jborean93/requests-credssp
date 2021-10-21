@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0 - TBD
+
+* Dropped Python 2.7 and 3.5, new minimum is 3.6
+* Added Linux kerberos dependency of [pykrb5](https://github.com/jborean93/pykrb5) to line up with `pyspnego` deps
+
+
 ## 1.2.0 - 2020-08-14
 
 * Changed authentication library from `ntlm-auth`, `gssapi`, or `pywin32` to `pyspnego`.
