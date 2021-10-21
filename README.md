@@ -1,6 +1,6 @@
 # requests-credssp
 
-[![Build Status](https://dev.azure.com/jborean93/jborean93/_apis/build/status/jborean93.requests-credssp?branchName=master)](https://dev.azure.com/jborean93/jborean93/_build/latest?definitionId=5&branchName=master)
+[![Test workflow](https://github.com/jborean93/requests-credssp/actions/workflows/ci.yml/badge.svg)](https://github.com/jborean93/requests-credssp/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/jborean93/requests-credssp/branch/master/graph/badge.svg)](https://codecov.io/gh/jborean93/requests-credssp)
 [![PyPI version](https://badge.fury.io/py/requests-credssp.svg)](https://badge.fury.io/py/requests-credssp)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/jborean93/request-credssp/blob/master/LICENSE)
@@ -26,14 +26,13 @@ This library supports the following CredSSP features
 
 The following Python libraries are required;
 
-* Python 2.7, 3.5+
+* Python 3.6+
 * [cryptography](https://github.com/pyca/cryptography)
-* [six](https://pypi.python.org/pypi/six/)
 * [pyasn1>=0.3.1](https://github.com/etingof/pyasn1)
 * [pyOpenSSL>=16.0.0](https://github.com/pyca/pyopenssl)
 * [pyspnego](https://github.com/jborean93/pyspnego)
 * [requests>=2.0.0](https://pypi.python.org/pypi/requests)
-* For Kerberos authentication on Unix [python-gssapi>=1.5.0](https://github.com/pythongssapi/python-gssapi)
+* For Kerberos authentication on Unix [python-gssapi>=1.5.0](https://github.com/pythongssapi/python-gssapi) and [pykrb5](https://github.com/jborean93/pykrb5)
 
 By default, this library can authenticate with a Windows host using NTLM
 messages, if Kerberos authentication is desired, please read the below.
@@ -93,7 +92,7 @@ Once installed, the file `/etc/krb5.conf` should be configured so it can talk
 with the Kerberos KDC.
 
 To add proper SPNEGO support with `python-gssapi`, the
-[gss-ntlmss](https://github.com/simo5/gss-ntlmssp) should also be installed
+[gss-ntlmssp](https://github.com/simo5/gss-ntlmssp) should also be installed
 which adds NTLM as a supported GSSAPI mechanism required for proper SPNEGO
 interoperability with Windows. This package can be installed with;
 

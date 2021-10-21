@@ -3,14 +3,10 @@
 
 import logging
 
+from logging import NullHandler
+
 from requests_credssp.credssp import HttpCredSSPAuth
 
-try:
-    from logging import NullHandler
-except ImportError:  # pragma: no cover
-    class NullHandler(logging.Handler):
-        def emit(self, record):
-            pass
 
 logger = logging.getLogger(__name__)
 logger.addHandler(NullHandler())

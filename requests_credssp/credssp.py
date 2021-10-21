@@ -15,15 +15,12 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from OpenSSL import SSL
 from pyasn1.codec.der import encoder, decoder
 from requests.auth import AuthBase
+from urllib.parse import urlparse
 
 from requests_credssp.asn_structures import NegoToken, TSCredentials, \
     TSPasswordCreds, TSRequest
 from requests_credssp.exceptions import AuthenticationException, InvalidConfigurationException
 
-try:
-    from urlparse import urlparse
-except ImportError:
-    from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
 

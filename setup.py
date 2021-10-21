@@ -18,11 +18,10 @@ with open(abs_path('README.md'), mode='rb') as fd:
 
 setup(
     name='requests-credssp',
-    version='1.2.0',
+    version='1.3.0',
     packages=['requests_credssp'],
     install_requires=[
         "cryptography",
-        "six",
         "pyasn1>=0.3.1",
         "pyOpenSSL>=16.0.0",
         "pyspnego",
@@ -31,10 +30,11 @@ setup(
     extras_require={
         'kerberos:sys_platform=="win32"': [],
         'kerberos:sys_platform!="win32"': [
-            'gssapi>=1.5.0'
+            'gssapi>=1.5.0',
+            'krb5',
         ]
     },
-    python_requires='>=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*',
+    python_requires='>=3.6',
     author='Jordan Borean',
     author_email='jborean93@gmail.com',
     url='https://github.com/jborean93/requests-credssp',
@@ -46,13 +46,11 @@ setup(
     classifiers=[
         'Development Status :: 4 - Beta',
         'License :: OSI Approved :: BSD License',
-        'Programming Language :: Python :: 2',
-        'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
     ],
 )
