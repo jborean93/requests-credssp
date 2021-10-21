@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.3.0 - TBD
+## 1.3.0 - 2021-10-22
 
 * Dropped Python 2.7 and 3.5, new minimum is 3.6
 * Added Linux kerberos dependency of [pykrb5](https://github.com/jborean93/pykrb5) to line up with `pyspnego` deps
