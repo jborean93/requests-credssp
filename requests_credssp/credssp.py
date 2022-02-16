@@ -160,7 +160,7 @@ class CredSSPContext(object):
         self._verify_public_keys(nonce, response_key, server_public_key)
 
         log.debug("Sending encrypted credentials")
-        enc_credentials = self._get_encrypted_credentials(context)
+        enc_credentials = self._get_encrypted_credentials(context, self.username, self.password)
 
         yield self.wrap(enc_credentials), "Step 5. Delegate Credentials"
 
@@ -253,7 +253,7 @@ class CredSSPContext(object):
             raise AuthenticationException("Could not verify key sent from the server, potential man in the middle "
                                           "attack")
 
-    def _get_encrypted_credentials(self, context):
+    def _get_encrypted_credentials(self, context, username, password):
         """
         [MS-CSSP] 3.1.5 Processing Events and Sequencing Rules - Step 5
         https://msdn.microsoft.com/en-us/library/cc226791.aspx
@@ -265,18 +265,18 @@ class CredSSPContext(object):
         server
 
         :param context: The authenticated security context
+        :param username: The username to encrypt.
+        :param password: The password to encrypt.
         :return: The encrypted TSRequest that contains the user's credentials
         """
         domain = u""
-        if "\\" in context.username:
-            domain, username = context.username.split('\\', 1)
-        else:
-            username = context.username
+        if "\\" in username:
+            domain, username = username.split('\\', 1)
 
         ts_password = TSPasswordCreds()
         ts_password['domainName'] = domain.encode('utf-16-le')
         ts_password['userName'] = username.encode('utf-16-le')
-        ts_password['password'] = context.password.encode('utf-16-le')
+        ts_password['password'] = password.encode('utf-16-le')
 
         ts_credentials = TSCredentials()
         ts_credentials['credType'] = ts_password.CRED_TYPE

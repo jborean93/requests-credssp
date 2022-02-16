@@ -18,7 +18,7 @@ with open(abs_path('README.md'), mode='rb') as fd:
 
 setup(
     name='requests-credssp',
-    version='1.3.0',
+    version='1.3.1',
     packages=['requests_credssp'],
     install_requires=[
         "cryptography",
@@ -30,8 +30,7 @@ setup(
     extras_require={
         'kerberos:sys_platform=="win32"': [],
         'kerberos:sys_platform!="win32"': [
-            'gssapi>=1.5.0',
-            'krb5',
+            'pyspnego[kerberos]',
         ]
     },
     python_requires='>=3.6',
