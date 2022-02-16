@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.1 - 2022-02-16
+
+* Fix usage of recently removed pyspnego feature
+
+
 ## 1.3.0 - 2021-10-22
 
 * Dropped Python 2.7 and 3.5, new minimum is 3.6

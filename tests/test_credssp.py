@@ -635,10 +635,6 @@ class TestCredSSPContext(object):
 
     def test_get_encrypted_credentials(self):
         class FakeContext(object):
-            def __init__(self):
-                self.username = "domain\\username"
-                self.password = "password"
-
             def wrap(self, data):
                 return WrapResult(data + (b"\x00" * 4))
 
@@ -670,7 +666,7 @@ class TestCredSSPContext(object):
                    b"\x70\x00\x61\x00\x73\x00\x73\x00" \
                    b"\x77\x00\x6f\x00\x72\x00\x64\x00" \
                    b"\x00\x00\x00\x00"
-        actual = credssp._get_encrypted_credentials(context)
+        actual = credssp._get_encrypted_credentials(context, "domain\\username", "password")
         assert actual == expected
 
 
