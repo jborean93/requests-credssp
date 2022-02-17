@@ -106,12 +106,14 @@ class CredSSPContext:
             except spnego.exceptions.SpnegoError as e:
                 # For backwards compatibility, base_error is not set if an authentication failure happened. If it is
                 # set then it's treated as an error from the peer and raises as an NTStatusException.
-                if e.base_error is None:
+                if e.base_error is None or e.nt_status == 0xFFFFFFFF:
                     raise AuthenticationException(str(e)) from e
                 else:
                     # Value in SpnegoError is signed but NTStatusException expects an unsigned value
-                    b_nt_status = e.nt_status.to_bytes(4, byteorder=sys.byteorder, signed=True)
-                    nt_status = int.from_bytes(b_nt_status, byteorder=sys.byteorder, signed=False)
+                    nt_status = e.nt_status
+                    if nt_status < 0:
+                        b_nt_status = nt_status.to_bytes(4, byteorder=sys.byteorder, signed=True)
+                        nt_status = int.from_bytes(b_nt_status, byteorder=sys.byteorder, signed=False)
                     raise NTStatusException(nt_status, str(e)) from e
 
             current_step = self._context.get_extra_info("auth_stage", "Unknown")
