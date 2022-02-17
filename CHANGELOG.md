@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.0.0 - TBD
+
+* Use `pyspnego` for managing the CredSSP exchange
+* Removed the deps of `pyOpenSSl` and `pyasn1` as `pyspnego` does all the work there
+* Added `wrap_winrm` and `unwrap_winrm` to unify the WinRM message encryption code into the one location
+
+### Breaking Changes
+
+* Removed the deprecated properties and methods on the `HttpCredSSPAuth` class:
+  * `tls_context` - no longer available
+  * `tls_connection` - use `auth.contexts[hostname].tls_connection`
+  * `cipher_negotiated` - use `auth.contexts[hostname].tls_connection.cipher()[0]`
+  * `wrap()` - use `auth.contexts[hostname].wrap()`
+  * `unwrap()` - use `auth.contexts[hostname].unwrap()`
+* These properties and methods were removed in favour of `credssp_auth.contexts[hostname].tls_context` and so on.
+
 ## 1.3.1 - 2022-02-16
 
 * Fix usage of recently removed pyspnego feature
