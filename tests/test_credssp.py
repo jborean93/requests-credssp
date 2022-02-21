@@ -78,9 +78,9 @@ class TestHttpCredSSPAuthFunctional(object):
 
     @pytest.fixture(scope='class', autouse=True)
     def runner(self):
-        server = os.environ.get('CREDSSP_SERVER', "server2019.domain.test")
-        username = os.environ.get('CREDSSP_USERNAME', "vagrant-domain@DOMAIN.TEST")
-        password = os.environ.get('CREDSSP_PASSWORD', "VagrantPass1")
+        server = os.environ.get('CREDSSP_SERVER', None)
+        username = os.environ.get('CREDSSP_USERNAME', None)
+        password = os.environ.get('CREDSSP_PASSWORD', None)
 
         if username and password and server:
             return server, username, password

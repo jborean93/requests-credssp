@@ -22,7 +22,7 @@ setup(
     packages=['requests_credssp'],
     install_requires=[
         "cryptography",
-        "pyspnego",
+        "pyspnego>=0.5.0",
         "requests>=2.0.0",
     ],
     extras_require={
