@@ -28,11 +28,9 @@ The following Python libraries are required;
 
 * Python 3.6+
 * [cryptography](https://github.com/pyca/cryptography)
-* [pyasn1>=0.3.1](https://github.com/etingof/pyasn1)
-* [pyOpenSSL>=16.0.0](https://github.com/pyca/pyopenssl)
 * [pyspnego](https://github.com/jborean93/pyspnego)
 * [requests>=2.0.0](https://pypi.python.org/pypi/requests)
-* For Kerberos authentication on Unix [python-gssapi>=1.5.0](https://github.com/pythongssapi/python-gssapi) and [pykrb5](https://github.com/jborean93/pykrb5)
+* For Kerberos authentication on Unix [python-gssapi](https://github.com/pythongssapi/python-gssapi) and [pykrb5](https://github.com/jborean93/pykrb5) installed with `requests-credssp[kerberos]`
 
 By default, this library can authenticate with a Windows host using NTLM
 messages, if Kerberos authentication is desired, please read the below.
@@ -255,5 +253,4 @@ authentication process.
 
 ## Backlog
 
-* Replace dependency of pyOpenSSL if possible with inbuilt functions in Python
 * Add support for different credential types like smart card and redirected credentials
