@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0 - TBD
+## 2.0.0 - 2022-02-21
 
 * Use `pyspnego` for managing the CredSSP exchange
 * Removed the deps of `pyOpenSSl` and `pyasn1` as `pyspnego` does all the work there
