@@ -31,7 +31,7 @@ setup(
             'pyspnego[kerberos]',
         ]
     },
-    python_requires='>=3.6',
+    python_requires='>=3.7',
     author='Jordan Borean',
     author_email='jborean93@gmail.com',
     url='https://github.com/jborean93/requests-credssp',
@@ -44,10 +44,10 @@ setup(
         'Development Status :: 4 - Beta',
         'License :: OSI Approved :: BSD License',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
     ],
 )

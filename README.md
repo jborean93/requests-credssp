@@ -26,7 +26,7 @@ This library supports the following CredSSP features
 
 The following Python libraries are required;
 
-* Python 3.6+
+* Python 3.7+
 * [cryptography](https://github.com/pyca/cryptography)
 * [pyspnego](https://github.com/jborean93/pyspnego)
 * [requests>=2.0.0](https://pypi.python.org/pypi/requests)

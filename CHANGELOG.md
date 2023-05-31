@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.0 - TBD
+
+* Dropped Python 3, new minimum is 3.7
+
 ## 2.0.0 - 2022-02-21
 
 * Use `pyspnego` for managing the CredSSP exchange
