@@ -36,7 +36,7 @@ class TestHttpCredSSPAuth(object):
         response.headers['www-authenticate'] = "Negotiate"
         with pytest.raises(AuthenticationException) as exc:
             HttpCredSSPAuth._check_credssp_supported(response)
-        assert str(exc.value) == "The server did not response CredSSP being " \
+        assert str(exc.value) == "The server did not respond with CredSSP as " \
                                  "an available authentication method - " \
                                  "actual: 'Negotiate'"
 
@@ -61,7 +61,7 @@ class TestHttpCredSSPAuth(object):
         response = requests.Response()
         with pytest.raises(AuthenticationException) as exc:
             HttpCredSSPAuth._get_credssp_token(response, pattern, "step 1")
-        assert str(exc.value) == "Server did not response with a CredSSP " \
+        assert str(exc.value) == "Server did not respond with a CredSSP " \
                                  "token after step step 1 - actual ''"
 
     def test_get_credssp_token_fail_no_credssp_token(self):
@@ -70,8 +70,20 @@ class TestHttpCredSSPAuth(object):
         response.headers['www-authenticate'] = "NTLM YWJj"
         with pytest.raises(AuthenticationException) as exc:
             HttpCredSSPAuth._get_credssp_token(response, pattern, "step 1")
-        assert str(exc.value) == "Server did not response with a CredSSP " \
+        assert str(exc.value) == "Server did not respond with a CredSSP " \
                                  "token after step step 1 - actual 'NTLM YWJj'"
+
+    def test_get_credssp_token_fail_unauthorized(self):
+        pattern = re.compile(r"CredSSP ([^,\s]*)$", re.I)
+        response = requests.Response()
+        response.status_code = 401
+        response.headers['www-authenticate'] = "Negotiate, Basic realm=\"WSMAN\", CredSSP"
+        with pytest.raises(AuthenticationException) as exc:
+            HttpCredSSPAuth._get_credssp_token(response, pattern, "Credential exchange")
+        assert str(exc.value) == "Server did not respond with a CredSSP token after step Credential exchange - " \
+                                 "actual 'Negotiate, Basic realm=\"WSMAN\", CredSSP'. The server rejected the " \
+                                 "authentication with 401 Unauthorized, check the username, password and that the " \
+                                 "account is allowed to connect"
 
 
 class TestHttpCredSSPAuthFunctional(object):

@@ -243,8 +243,8 @@ class HttpCredSSPAuth(AuthBase):
     def _check_credssp_supported(response):
         auth_supported = response.headers.get('www-authenticate', '')
         if 'CREDSSP' not in auth_supported.upper():
-            error_msg = "The server did not response CredSSP being an available authentication method - actual: '%s'" \
-                        % auth_supported
+            error_msg = "The server did not respond with CredSSP as an available authentication method - " \
+                        "actual: '%s'" % auth_supported
             raise AuthenticationException(error_msg)
 
     @staticmethod
@@ -259,8 +259,11 @@ class HttpCredSSPAuth(AuthBase):
         token_match = pattern.search(auth_header)
 
         if not token_match:
-            error_msg = "Server did not response with a CredSSP token after step %s - actual '%s'" \
+            error_msg = "Server did not respond with a CredSSP token after step %s - actual '%s'" \
                         % (step_name, auth_header)
+            if response.status_code == 401:
+                error_msg += ". The server rejected the authentication with 401 Unauthorized, check the username, " \
+                             "password and that the account is allowed to connect"
             raise AuthenticationException(error_msg)
 
         token = token_match.group(1)
