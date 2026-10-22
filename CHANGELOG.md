@@ -2,7 +2,7 @@
 
 ## 2.1.0 - TBD
 
-* Dropped Python 3, new minimum is 3.7
+* Dropped Python 3.6, 3.7 and 3.8, new minimum is 3.9
 
 ## 2.0.0 - 2022-02-21
 

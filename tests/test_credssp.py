@@ -77,7 +77,8 @@ class TestHttpCredSSPAuth(object):
 class TestHttpCredSSPAuthFunctional(object):
 
     @pytest.fixture(scope='class', autouse=True)
-    def runner(self):
+    @classmethod
+    def runner(cls):
         server = os.environ.get('CREDSSP_SERVER', None)
         username = os.environ.get('CREDSSP_USERNAME', None)
         password = os.environ.get('CREDSSP_PASSWORD', None)
