@@ -163,7 +163,7 @@ class CredSSPContext:
 class HttpCredSSPAuth(AuthBase):
 
     def __init__(self, username, password, auth_mechanism='auto',
-                 disable_tlsv1_2=False, minimum_version=2):
+                 disable_tlsv1_2=False, minimum_version=2, hostname_override=None):
         """
         Initialises the CredSSP auth handler for dealing with requests.
 
@@ -179,12 +179,17 @@ class HttpCredSSPAuth(AuthBase):
         :param minimum_version: The minimum server version that can be
             authenticated against, set to 5 to ensure CVE 2018-0886 is always
             mitigated and older hosts can't be used.
+        :param hostname_override: The hostname to use when building the
+            service principal name (HTTP/<hostname>) instead of the hostname
+            in the request URL. The context is still stored in contexts under
+            the URL hostname.
         """
         self.username = username
         self.password = password
         self.auth_mechanism = auth_mechanism
         self.disable_tlsv1_2 = disable_tlsv1_2
         self.minimum_version = minimum_version
+        self.hostname_override = hostname_override
         self.contexts: typing.Dict[str, CredSSPContext] = {}
 
     def __call__(self, request):
@@ -202,8 +207,8 @@ class HttpCredSSPAuth(AuthBase):
 
     def handle_401(self, response, **kwargs):
         host = urlparse(response.url).hostname
-        context = CredSSPContext(host, self.username, self.password, self.auth_mechanism, self.disable_tlsv1_2,
-                                 self.minimum_version)
+        context = CredSSPContext(self.hostname_override or host, self.username, self.password, self.auth_mechanism,
+                                 self.disable_tlsv1_2, self.minimum_version)
         self.contexts[host] = context
 
         credssp_gen = context.credssp_generator()

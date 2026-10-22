@@ -119,6 +119,7 @@ you can configure the following settings when initialising the CredSSP class;
 * `auth_mechanism`: The authentication mechanism to use initially, default is `auto`
 * `disable_tlsv1_2`: Whether to disable `TLSv1.2` support and work with older protocols like `TLSv1.0`, default is `False`
 * `minimum_version`: The minimum CredSSP server version that is required by the client, default is `2`
+* `hostname_override`: The hostname to use for the service principal name (`HTTP/<hostname>`) instead of the hostname in the URL, default is `None`
 
 ### Authentication Mechanisms
 

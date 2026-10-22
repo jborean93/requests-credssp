@@ -74,6 +74,36 @@ class TestHttpCredSSPAuth(object):
                                  "token after step step 1 - actual 'NTLM YWJj'"
 
 
+    @pytest.mark.parametrize("auth_mechanism", ["auto", "kerberos"])
+    @pytest.mark.parametrize("hostname_override, expected", [
+        (None, "server.domain.local"),
+        ("alias.domain.local", "alias.domain.local"),
+    ])
+    def test_handle_401_hostname_override(self, monkeypatch, auth_mechanism, hostname_override, expected):
+        class StopExchange(Exception):
+            pass
+
+        def credssp_generator(self):
+            raise StopExchange()
+
+        spnego_hostnames = []
+        monkeypatch.setattr("requests_credssp.credssp.spnego.client",
+                            lambda *args, **kwargs: spnego_hostnames.append(kwargs["hostname"]))
+        monkeypatch.setattr(CredSSPContext, "credssp_generator", credssp_generator)
+
+        auth = HttpCredSSPAuth("user@DOMAIN.LOCAL", "pass", auth_mechanism=auth_mechanism,
+                               hostname_override=hostname_override)
+        response = requests.Response()
+        response.url = "https://server.domain.local:5986/wsman"
+
+        with pytest.raises(StopExchange):
+            auth.handle_401(response)
+
+        # the SPN uses the override but the context is still found by the URL hostname
+        assert auth.contexts["server.domain.local"].hostname == expected
+        assert spnego_hostnames == [expected] * (2 if auth_mechanism == "kerberos" else 1)
+
+
 class TestHttpCredSSPAuthFunctional(object):
 
     @pytest.fixture(scope='class', autouse=True)

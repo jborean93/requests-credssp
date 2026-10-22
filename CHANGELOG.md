@@ -3,6 +3,7 @@
 ## 2.1.0 - TBD
 
 * Dropped Python 3, new minimum is 3.7
+* Added the `hostname_override` option to `HttpCredSSPAuth` to set the hostname used for the service principal name instead of the hostname in the URL
 
 ## 2.0.0 - 2022-02-21
 
